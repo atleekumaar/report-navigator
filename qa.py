@@ -387,10 +387,7 @@ class QAEngine:
             pass
 
         # Parse sources into [S1], [S2] blocks
-        source_blocks = re.findall(r'(\[S\d+\][^
-]*
-)(.*?)(?=
-\[S\d+\]|\Z)', sources_part, re.DOTALL)
+        source_blocks = re.findall(r'(\[S\d+\][^\n]*\n)(.*?)(?=\n\[S\d+\]|\Z)', sources_part, re.DOTALL)
 
         # Full grammatical and domain stop words
         stop_words = {
