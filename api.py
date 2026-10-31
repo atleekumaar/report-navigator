@@ -15,6 +15,7 @@ except ImportError:
     import fitz
 
 import config
+import database as db
 from ingest import ingest_pdf
 from index import build_index, Indexer
 from retriever import HybridRetriever
@@ -264,7 +265,8 @@ def health_check():
         "pdf_exists": exists,
         "active_doc": active_pdf.name if exists else None,
         "page_count": page_count,
-        "chunks_indexed": chunk_count
+        "chunks_indexed": chunk_count,
+        "database": db.check_health()
     }
 
 
@@ -284,6 +286,8 @@ def submit_feedback(req: FeedbackRequest):
             f.write(json.dumps(record) + "\n")
     except Exception as e:
         print(f"[API] Error saving feedback: {e}")
+    # Persist to Neon database (non-blocking, best-effort)
+    db.log_feedback(query=req.query, answer=req.answer, rating=req.rating, comment=req.comment)
     return {"status": "success", "message": "Feedback recorded successfully."}
 
 
@@ -569,10 +573,22 @@ def direct_query_endpoint(req: ChatRequest):
     engine = get_qa_engine()
     history_dicts = [{"role": m.role, "content": m.content} for m in req.history] if req.history else []
     try:
+        t0 = time.time()
         answer_payload = engine.answer(
             query=req.query,
             history=history_dicts,
             use_rerank=req.use_rerank if req.use_rerank is not None else True
+        )
+        latency_ms = int((time.time() - t0) * 1000)
+        # Log to Neon (best-effort, non-blocking)
+        active_pdf = get_active_pdf()
+        db.log_query(
+            document_id=active_pdf.stem if active_pdf.exists() else None,
+            query=req.query,
+            answer=answer_payload.get("answer", ""),
+            confidence=answer_payload.get("confidence"),
+            citations=answer_payload.get("citations"),
+            latency_ms=latency_ms,
         )
         return answer_payload
     except Exception as e:
@@ -602,6 +618,7 @@ async def chat_sse_stream(req: ChatRequest):
             try:
                 history_dicts = [{"role": m.role, "content": m.content} for m in req.history] if req.history else []
                 loop = asyncio.get_running_loop()
+                t0 = time.time()
                 answer_payload = await loop.run_in_executor(
                     None,
                     lambda: engine.answer(
@@ -610,6 +627,17 @@ async def chat_sse_stream(req: ChatRequest):
                         use_rerank=req.use_rerank if req.use_rerank is not None else True,
                         on_status=sync_status_callback
                     )
+                )
+                latency_ms = int((time.time() - t0) * 1000)
+                # Log to Neon (best-effort)
+                active_pdf = get_active_pdf()
+                db.log_query(
+                    document_id=active_pdf.stem if active_pdf.exists() else None,
+                    query=req.query,
+                    answer=answer_payload.get("answer", ""),
+                    confidence=answer_payload.get("confidence"),
+                    citations=answer_payload.get("citations"),
+                    latency_ms=latency_ms,
                 )
                 await queue.put({"event": "answer", "data": answer_payload})
             except Exception as e:
@@ -669,6 +697,29 @@ def run_indexing_task(file_path: Path) -> Dict[str, Any]:
             "table_chunks": table_chunks,
             "filename": file_path.name
         }
+
+        # Register document in Neon (best-effort)
+        try:
+            import hashlib
+            doc_id = hashlib.md5(file_path.name.encode()).hexdigest()[:16]
+            file_size = file_path.stat().st_size if file_path.exists() else 0
+            try:
+                import pymupdf as fitz_mod
+            except ImportError:
+                import fitz as fitz_mod
+            d = fitz_mod.open(str(file_path))
+            pg_count = len(d)
+            d.close()
+            db.register_document(
+                doc_id=doc_id,
+                filename=file_path.name,
+                title=file_path.stem.replace("_", " ").title(),
+                page_count=pg_count,
+                table_count=table_chunks,
+                file_size=file_size,
+            )
+        except Exception as reg_err:
+            print(f"[API] Document registration to Neon skipped: {reg_err}")
 
         _index_status = {
             "status": "complete",

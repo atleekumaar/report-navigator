@@ -80,13 +80,15 @@ def test_swagger_ui_and_openapi_schema(client):
 
 
 def test_health_endpoint(client):
-    """Test GET /api/health."""
+    """Test GET /api/health includes database status."""
     res = client.get("/api/health")
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "ok"
     assert "pdf_exists" in data
     assert "active_doc" in data
+    assert "database" in data
+    assert data["database"]["status"] in ("connected", "not_configured", "error")
 
 
 def test_document_metadata(client):
