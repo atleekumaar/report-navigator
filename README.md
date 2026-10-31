@@ -10,6 +10,180 @@ In official government statistical reports, policy researchers, journalists, and
 
 ---
 
+## Research Foundation
+
+Report Navigator is based on the research and evaluation described in **“Beyond Retrieval Metrics: A Reproducible Framework for End-to-End RAG Optimization”** by Atul Shukla. The paper presents a reproducible RAG evaluation framework and studies BM25 and dense retrieval, hybrid fusion, Reciprocal Rank Fusion (RRF), cross-encoder reranking, filtering, and end-to-end answer quality.
+
+The research paper was selected for the AI conference **Advances in Foundational and Applied Artificial Intelligence** at **IIT Roorkee**. The paper is included in this repository:
+
+[`docs/CARE_2026_Extended_Abstract.pdf`](docs/CARE_2026_Extended_Abstract.pdf)
+
+The project applies the paper's retrieval and evaluation principles to grounded question answering over statistical PDF reports, with a focus on evidence-backed answers, page citations, and abstention when evidence is insufficient.
+
+---
+
+## Architecture
+
+Report Navigator is a Python/FastAPI backend paired with a Next.js web client. The backend owns PDF ingestion, indexing, retrieval, answer generation, citation verification, and evidence rendering. The client presents the active report, streamed answers, citations, and page-level evidence.
+
+```text
+┌─────────────────────────────────────┐
+│ Next.js web client                  │
+│ Chat UI · citations · evidence view │
+└──────────────────┬──────────────────┘
+                   │ REST + Server-Sent Events
+┌──────────────────▼──────────────────┐
+│ FastAPI (api.py)                    │
+│ document · chat · indexing · pages  │
+└───────┬─────────────────────┬───────┘
+        │                     │
+        ▼                     ▼
+┌──────────────────┐  ┌──────────────────────────┐
+│ Ingestion/index  │  │ QA and evidence pipeline │
+│ ingest.py        │  │ qa.py · retriever.py     │
+│ index.py         │  │ highlight.py             │
+└────────┬─────────┘  └─────────────▲────────────┘
+         │                          │
+         ▼                          │
+┌───────────────────────────────────┴┐
+│ PDF pages · extracted chunks ·      │
+│ BM25 index · optional embeddings   │
+│ data/ · index_store/               │
+└────────────────────────────────────┘
+```
+
+### PDF-to-answer pipeline
+
+1. **Upload/select a report:** The PDF is stored under `data/` and becomes the active document; the web client can also stream indexing progress.
+2. **Extract evidence:** `ingest.py` extracts page text, detects headings and tables, applies OCR when configured, and records page numbers and bounding rectangles with each chunk.
+3. **Build search indexes:** `index.py` writes chunk data and builds a BM25 index, plus dense embeddings when dense retrieval is enabled.
+4. **Understand and retrieve:** `qa.py` prepares the question (and optional conversation history). `retriever.py` searches lexical and dense indexes, combines candidates using rank fusion, and can apply cross-encoder reranking.
+5. **Answer from context:** The QA engine generates an evidence-grounded answer using the configured LLM provider, with an evidence-based local fallback when a provider is unavailable.
+6. **Verify and cite:** Retrieved source material is used to validate citations and answer support; the response includes citations and retrieval trace data.
+7. **Inspect evidence:** The API serves PDF pages and rendered/normalized citation rectangles so users can verify a cited passage in the original document.
+
+### Main components
+
+| Component | Responsibility |
+| :--- | :--- |
+| `api.py` | FastAPI routes for health, document metadata/PDF, chat, PDF indexing, index status, and page evidence. Swagger UI is available at `/docs`. |
+| `ingest.py` | PDF text/table extraction, OCR fallback, chunking, and source-page geometry. |
+| `index.py` | BM25 and optional dense index construction and persistence. |
+| `retriever.py` | Hybrid lexical/dense retrieval, fusion, table context expansion, and optional reranking. |
+| `qa.py` | Query handling, LLM/fallback answer generation, and citation verification. |
+| `highlight.py` | Citation and chunk geometry lookup and highlighted-page rendering. |
+| `src/` | Dynamic report solver, question parsing, text/table extraction helpers used by the competition workflow. |
+| `web/` | Next.js chat interface, document sidebar, citations, pipeline status, and evidence panel. |
+
+---
+
+## Repository File Structure
+
+This tree lists the repository's source, configuration, fixtures, and documentation. Generated environments and caches such as `.git/`, `venv/`, `web/node_modules/`, `web/.next/`, and Python cache directories are intentionally omitted.
+
+```text
+Report Navigator/
+├── .github/
+│   └── workflows/
+│       └── ci.yml
+├── data/
+│   ├── .gitkeep
+│   ├── active_doc.json
+│   ├── questions_with_answers.jsonl
+│   ├── report.pdf
+│   ├── sample_answers.jsonl
+│   └── sample_questions.jsonl
+├── docs/
+│   ├── CARE_2026_Extended_Abstract.pdf
+│   ├── decisions.md
+│   └── error_analysis.md
+├── index_store/
+│   ├── .gitkeep
+│   └── metadata.json
+├── models/
+│   └── validated.json
+├── scripts/
+│   ├── build.ps1
+│   ├── install.ps1
+│   ├── lint.ps1
+│   ├── run.ps1
+│   ├── test.ps1
+│   └── type-check.ps1
+├── src/
+│   ├── __init__.py
+│   ├── question_parser.py
+│   ├── solver.py
+│   ├── table_engine.py
+│   └── text_engine.py
+├── tests/
+│   ├── test_smoke.py
+│   ├── test_solver.py
+│   ├── test_swagger_apis.py
+│   └── test_system.py
+├── web/
+│   ├── app/
+│   │   ├── globals.css
+│   │   ├── layout.tsx
+│   │   ├── not-found.tsx
+│   │   └── page.tsx
+│   ├── components/
+│   │   ├── chat/
+│   │   │   ├── AnswerCard.tsx
+│   │   │   ├── CitationChip.tsx
+│   │   │   ├── Composer.tsx
+│   │   │   ├── NotFoundCard.tsx
+│   │   │   ├── PipelineStatus.tsx
+│   │   │   └── StarterChips.tsx
+│   │   ├── evidence/
+│   │   │   ├── EvidencePanel.tsx
+│   │   │   ├── PageMinimap.tsx
+│   │   │   ├── TableEvidence.tsx
+│   │   │   └── TraceTimeline.tsx
+│   │   ├── sidebar/
+│   │   │   └── Sidebar.tsx
+│   │   └── ui/
+│   │       └── Illustrations.tsx
+│   ├── lib/
+│   │   ├── api.ts
+│   │   └── types.ts
+│   ├── public/
+│   │   └── bg-wave.jpg
+│   ├── .env.example
+│   ├── .eslintrc.json
+│   ├── next-env.d.ts
+│   ├── next.config.mjs
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── postcss.config.mjs
+│   ├── tailwind.config.ts
+│   └── tsconfig.json
+├── .env.example
+├── .gitignore
+├── Makefile
+├── README.md
+├── Report-Navigator-Plan (1).md
+├── api.py
+├── cli.py
+├── config.py
+├── create_sample_report.py
+├── eval.py
+├── eval_questions.jsonl
+├── highlight.py
+├── index.py
+├── ingest.py
+├── predict.py
+├── pytest.ini
+├── qa.py
+├── requirements.txt
+├── retriever.py
+├── submission.yaml
+└── train.py
+```
+
+`data/report.pdf` is the tracked synthetic fixture. The optional `data/report_A.pdf`, uploaded PDFs, and generated index chunks/embeddings are local runtime data and are not included in the tree above.
+
+---
+
 ## Quickstart (Fresh Clone)
 
 ### Prerequisites
