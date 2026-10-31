@@ -49,3 +49,4 @@ Our architecture tackles this through a **Dynamic Structured Table Solver & Co-o
   - High confidence on abstention (`0.95`): Assigned when absent entities are confirmed with zero occurrences across all pages.
   - Medium/Low confidence (`0.50` - `0.70`): Assigned when falling back to heuristic window matching.
 * **Impact**: High calibration ensures maximum bonus points under automated metric scoring.
+

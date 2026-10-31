@@ -106,10 +106,11 @@ def get_document_metadata():
         "page_count": page_count,
         "table_count": table_count,
         "starter_questions": [
-            "What was the overall unemployment rate in 2024?",
-            "Which state has the highest female labour force participation?",
-            "Compare male vs female unemployment in Kerala.",
-            "What was the LFPR for youth in 2023?"
+            "What was the number of road accident deaths in Pune city in 2023?",
+            "How many persons were killed in road accidents in Maharashtra in 2023?",
+            "How many two-wheeler riders were killed in road accidents in Allahabad (Prayagraj) in 2023?",
+            "How many road accident deaths in Hyderabad in 2023 were attributed to over-speeding?",
+            "How many road accidents were reported in Bareilly city in 2023?"
         ]
     }
 

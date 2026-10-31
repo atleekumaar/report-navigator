@@ -12,7 +12,7 @@ INDEX_DIR = BASE_DIR / os.getenv("INDEX_DIR", "index_store")
 INDEX_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-DEFAULT_PDF_PATH = DATA_DIR / "report.pdf"
+DEFAULT_PDF_PATH = DATA_DIR / "report_A.pdf" if (DATA_DIR / "report_A.pdf").exists() else DATA_DIR / "report.pdf"
 PDF_PATH = Path(os.getenv("PDF_PATH", str(DEFAULT_PDF_PATH)))
 
 CHUNKS_FILE = INDEX_DIR / "chunks.jsonl"

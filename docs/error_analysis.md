@@ -49,3 +49,4 @@ Across iterations on the official 50-question benchmark (`questions_with_answers
    - Memory usage stays below **350 MB** (limit is 6 GB).
    - CPU utilization completes in **< 1 second** on 2 CPU cores (limit is 20 minutes).
    - No external network access or GPU required.
+

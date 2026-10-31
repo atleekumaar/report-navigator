@@ -356,8 +356,41 @@ class QAEngine:
         question_part = parts[0].replace("Question:", "").strip()
         sources_part = parts[1] if len(parts) > 1 else ""
 
+        # Try dynamic solver first if target PDF exists
+        try:
+            if config.PDF_PATH.exists():
+                from src.solver import DynamicReportSolver
+                solver = DynamicReportSolver(str(config.PDF_PATH))
+                res = solver.solve(qid="query", question=question_part)
+                if res.answer == "NOT_FOUND":
+                    return {
+                        "found": False,
+                        "answer": "Not found in the report. (The requested entity or metric is absent from the report).",
+                        "calculation": "",
+                        "confidence": "high",
+                        "citations": []
+                    }
+                elif res.answer and res.page:
+                    return {
+                        "found": True,
+                        "answer": f"According to the official statistics (p. {res.page}), the recorded figure is {res.answer} [S1].",
+                        "calculation": "",
+                        "confidence": "high",
+                        "citations": [
+                            {
+                                "source_id": "S1",
+                                "quote": res.answer
+                            }
+                        ]
+                    }
+        except Exception:
+            pass
+
         # Parse sources into [S1], [S2] blocks
-        source_blocks = re.findall(r'(\[S\d+\][^\n]*\n)(.*?)(?=\n\[S\d+\]|\Z)', sources_part, re.DOTALL)
+        source_blocks = re.findall(r'(\[S\d+\][^
+]*
+)(.*?)(?=
+\[S\d+\]|\Z)', sources_part, re.DOTALL)
 
         # Full grammatical and domain stop words
         stop_words = {
