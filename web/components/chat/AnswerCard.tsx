@@ -76,30 +76,30 @@ export const AnswerCard: React.FC<AnswerCardProps> = ({
   const allVerified = answer.citations?.length > 0 && answer.citations.every((c) => c.verified);
 
   return (
-    <div className="rounded-card bg-surface border border-surfaceBorder p-5 shadow-lg space-y-4 transition-all duration-200 hover:border-slate-700/60">
+    <div className="rounded-2xl bg-[#320620]/75 border border-[#7D1B4D]/50 p-5 shadow-[0_10px_30px_rgba(15,0,10,0.5)] space-y-4 transition-all duration-200 hover:border-[#FF6EA7]/50 backdrop-blur-xl">
       {/* Top badges bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-surfaceBorder/50 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[#6B1442]/40 text-xs">
         <div className="flex items-center gap-2">
           {allVerified ? (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-verified/15 text-emerald-400 font-medium border border-verified/30">
-              <ShieldCheck className="w-3.5 h-3.5 text-verified" />
+            <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-emerald-950/40 text-emerald-300 font-semibold border border-emerald-500/40">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
               Verified Quotes
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-medium border border-slate-700">
-              <Sparkles className="w-3.5 h-3.5 text-accent" />
+            <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-[#45092C] text-[#FFA8C7] font-semibold border border-[#FF7AA8]/40">
+              <Sparkles className="w-3.5 h-3.5 text-[#FF6EA7]" />
               Grounded Answer
             </span>
           )}
 
           {/* Confidence Badge */}
           <span
-            className={`px-2 py-0.5 rounded-full font-mono text-[11px] uppercase tracking-wider font-semibold ${
+            className={`px-2.5 py-0.5 rounded-full font-mono text-[11px] uppercase tracking-wider font-bold ${
               answer.confidence === "high"
-                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                ? "bg-emerald-950/50 text-emerald-300 border border-emerald-500/30"
                 : answer.confidence === "medium"
-                ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
-                : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                ? "bg-[#520B33] text-[#FFA3C5] border border-[#FF7AA8]/40"
+                : "bg-amber-950/50 text-amber-300 border border-amber-500/30"
             }`}
           >
             {answer.confidence} Confidence
@@ -110,23 +110,23 @@ export const AnswerCard: React.FC<AnswerCardProps> = ({
         {onOpenTrace && (
           <button
             onClick={onOpenTrace}
-            className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-accent transition-colors"
+            className="flex items-center gap-1 text-[11px] text-[#FFA8C7] hover:text-white transition-colors"
           >
-            <Layers className="w-3.5 h-3.5" />
+            <Layers className="w-3.5 h-3.5 text-[#FF7AA8]" />
             <span>View Retrieval Trace</span>
           </button>
         )}
       </div>
 
       {/* Main answer text */}
-      <div className="text-slate-100 leading-relaxed text-sm md:text-[15px] selection:bg-accent/30">
+      <div className="text-[#FFF0F5] leading-relaxed text-sm md:text-[15px] selection:bg-[#FF6EA7]/40">
         {renderFormattedAnswer()}
       </div>
 
       {/* Calculation Block */}
       {answer.calculation && (
-        <div className="p-3 rounded-lg bg-black/40 border border-surfaceBorder/80 font-mono text-xs text-indigo-300 space-y-1">
-          <div className="flex items-center gap-1.5 text-indigo-400 font-semibold text-[11px] uppercase tracking-wider">
+        <div className="p-3 rounded-xl bg-[#1C0212]/90 border border-[#7D1B4D]/50 font-mono text-xs text-[#FFC4D8] space-y-1">
+          <div className="flex items-center gap-1.5 text-[#FF7AA8] font-bold text-[11px] uppercase tracking-wider">
             <Calculator className="w-3.5 h-3.5" />
             <span>Calculation</span>
           </div>
@@ -136,7 +136,7 @@ export const AnswerCard: React.FC<AnswerCardProps> = ({
 
       {/* Number Warning Check */}
       {answer.has_number_warning && (
-        <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">
+        <div className="flex items-start gap-2 p-2.5 rounded-xl bg-amber-950/30 border border-amber-500/40 text-amber-300 text-xs">
           <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
           <span>
             Please double-check numerical figures against the cited original page.
@@ -145,16 +145,16 @@ export const AnswerCard: React.FC<AnswerCardProps> = ({
       )}
 
       {/* Bottom utilities toolbar */}
-      <div className="pt-2 flex items-center justify-between border-t border-surfaceBorder/40 text-xs text-slate-400">
+      <div className="pt-2 flex items-center justify-between border-t border-[#6B1442]/40 text-xs text-[#D89AB3]">
         <div className="flex items-center gap-3">
           <button
             onClick={handleCopy}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md hover:bg-surfaceHover text-slate-400 hover:text-slate-200 transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg hover:bg-[#45092C] text-[#FFA8C7] hover:text-white transition-colors"
           >
             {copied ? (
               <>
-                <Check className="w-3.5 h-3.5 text-verified" />
-                <span className="text-verified">Copied</span>
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="text-emerald-400 font-semibold">Copied</span>
               </>
             ) : (
               <>
@@ -164,11 +164,11 @@ export const AnswerCard: React.FC<AnswerCardProps> = ({
             )}
           </button>
 
-          <div className="flex items-center gap-1 border-l border-surfaceBorder pl-3">
+          <div className="flex items-center gap-1 border-l border-[#6B1442]/50 pl-3">
             <button
               onClick={() => setFeedback(feedback === "up" ? null : "up")}
-              className={`p-1.5 rounded-md hover:bg-surfaceHover transition-colors ${
-                feedback === "up" ? "text-verified bg-verified/10" : "text-slate-400"
+              className={`p-1.5 rounded-lg hover:bg-[#45092C] transition-colors ${
+                feedback === "up" ? "text-emerald-400 bg-emerald-950/50" : "text-[#D89AB3]"
               }`}
               title="Helpful answer"
             >
@@ -176,8 +176,8 @@ export const AnswerCard: React.FC<AnswerCardProps> = ({
             </button>
             <button
               onClick={() => setFeedback(feedback === "down" ? null : "down")}
-              className={`p-1.5 rounded-md hover:bg-surfaceHover transition-colors ${
-                feedback === "down" ? "text-danger bg-danger/10" : "text-slate-400"
+              className={`p-1.5 rounded-lg hover:bg-[#45092C] transition-colors ${
+                feedback === "down" ? "text-rose-400 bg-rose-950/50" : "text-[#D89AB3]"
               }`}
               title="Incorrect or unverified"
             >
@@ -190,7 +190,7 @@ export const AnswerCard: React.FC<AnswerCardProps> = ({
         {answer.citations?.length > 0 && (
           <button
             onClick={() => onSelectCitation(answer.citations[0])}
-            className="text-xs text-accent hover:text-accent-hover font-medium underline underline-offset-4 decoration-accent/40"
+            className="text-xs text-[#FF6EA7] hover:text-[#FFA3C5] font-semibold underline underline-offset-4 decoration-[#FF6EA7]/50"
           >
             Inspect Evidence Page →
           </button>
@@ -199,4 +199,3 @@ export const AnswerCard: React.FC<AnswerCardProps> = ({
     </div>
   );
 };
-

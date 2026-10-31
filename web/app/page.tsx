@@ -16,7 +16,7 @@ import { NotFoundCard } from "@/components/chat/NotFoundCard";
 import { PipelineStatus } from "@/components/chat/PipelineStatus";
 import { StarterChips } from "@/components/chat/StarterChips";
 import { EvidencePanel } from "@/components/evidence/EvidencePanel";
-import { PanelRightClose, PanelRightOpen, Menu, Sparkles } from "lucide-react";
+import { Eye, EyeOff, Menu } from "lucide-react";
 
 export default function Home() {
   const [metadata, setMetadata] = useState<DocumentMetadata>({
@@ -138,7 +138,16 @@ export default function Home() {
     messages[messages.length - 1]?.answer?.citations || [];
 
   return (
-    <div className="h-screen w-screen flex overflow-hidden bg-background">
+    <div className="h-screen w-screen flex overflow-hidden bg-[#1A0312] relative select-none">
+      {/* Wave Background Image Asset with Soft Blend */}
+      <div
+        className="absolute inset-0 bg-cover bg-center pointer-events-none opacity-70 mix-blend-screen z-0"
+        style={{ backgroundImage: "url('/bg-wave.jpg')" }}
+      />
+
+      {/* Ambient Top-Right Radial Soft Pink Flare */}
+      <div className="absolute top-0 right-0 w-[550px] h-[450px] bg-gradient-to-bl from-[#FF5C93]/25 via-[#E02875]/10 to-transparent blur-3xl pointer-events-none z-0" />
+
       {/* Zone 1: Sidebar (Desktop + Mobile Drawer) */}
       <div
         className={`fixed inset-y-0 left-0 z-40 transform transition-transform duration-200 lg:relative lg:translate-x-0 ${
@@ -159,27 +168,27 @@ export default function Home() {
       {mobileSidebarOpen && (
         <div
           onClick={() => setMobileSidebarOpen(false)}
-          className="fixed inset-0 bg-black/60 z-30 lg:hidden"
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-30 lg:hidden"
         />
       )}
 
       {/* Main App Container */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative z-10">
         {/* Top Navbar */}
-        <header className="h-12 border-b border-surfaceBorder bg-surface/50 backdrop-blur-md px-4 flex items-center justify-between shrink-0">
+        <header className="h-13 border-b border-[#6B1442]/35 bg-[#260419]/70 backdrop-blur-xl px-5 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setMobileSidebarOpen(true)}
-              className="p-1.5 rounded-lg hover:bg-surface text-slate-400 lg:hidden"
+              className="p-1.5 rounded-lg hover:bg-[#45092C] text-[#FFA8C7] lg:hidden"
             >
               <Menu className="w-5 h-5" />
             </button>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-200 truncate max-w-sm">
-                {metadata.title}
+            <div className="flex items-center gap-2.5">
+              <span className="text-xs font-bold text-white tracking-wide truncate max-w-sm">
+                {metadata.title || "Report Navigator"}
               </span>
-              <span className="hidden sm:inline-block px-2 py-0.5 rounded-full bg-accent/10 border border-accent/20 text-[10px] font-mono text-accent">
-                p.1 - {metadata.page_count}
+              <span className="hidden sm:inline-block px-2.5 py-0.5 rounded-full bg-[#420A2B] border border-[#FF7AA8]/40 text-[10px] font-mono text-[#FFA8C7] font-semibold">
+                p. 1 - {metadata.page_count}
               </span>
             </div>
           </div>
@@ -187,16 +196,16 @@ export default function Home() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowEvidencePanel(!showEvidencePanel)}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface hover:bg-surfaceHover border border-surfaceBorder text-xs text-slate-300 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#3B0725]/80 hover:bg-[#520F36] border border-[#FF7AA8]/35 text-xs text-white font-medium transition-all shadow-sm"
             >
               {showEvidencePanel ? (
                 <>
-                  <PanelRightClose className="w-3.5 h-3.5" />
+                  <EyeOff className="w-3.5 h-3.5 text-[#FFA8C7]" />
                   <span className="hidden sm:inline">Hide Evidence</span>
                 </>
               ) : (
                 <>
-                  <PanelRightOpen className="w-3.5 h-3.5 text-accent" />
+                  <Eye className="w-3.5 h-3.5 text-[#FF6EA7]" />
                   <span className="hidden sm:inline">Show Evidence</span>
                 </>
               )}
@@ -207,20 +216,20 @@ export default function Home() {
         {/* Middle & Right Split Container */}
         <div className="flex-1 flex overflow-hidden">
           {/* Zone 2: Chat Stream */}
-          <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-background">
+          <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
             <div className="flex-1 overflow-y-auto px-4 py-6">
               <div className="max-w-3xl mx-auto space-y-6">
-                {/* Empty State */}
+                {/* Empty State Hero */}
                 {messages.length === 0 && (
                   <StarterChips
                     questions={
                       metadata.starter_questions.length > 0
                         ? metadata.starter_questions
                         : [
-                            "What was the total unemployment rate in 2024?",
-                            "Which state had the highest female labour force participation?",
-                            "Compare male vs female unemployment in Kerala.",
-                            "What are the main statistics reported in Table 3.1?",
+                            "What is the overall unemployment rate in the latest period?",
+                            "Which state recorded the highest female labour force participation?",
+                            "What are the key findings in Chapter 3?",
+                            "Compare the youth unemployment rate between 2023 and 2024.",
                           ]
                     }
                     onSelect={handleSendMessage}
@@ -232,7 +241,7 @@ export default function Home() {
                   <div key={msg.id} className="space-y-3">
                     {msg.role === "user" ? (
                       <div className="flex justify-end">
-                        <div className="max-w-xl rounded-2xl rounded-tr-sm bg-accent/20 border border-accent/30 text-slate-100 px-4 py-2.5 text-sm shadow-md">
+                        <div className="max-w-xl rounded-2xl rounded-tr-sm bg-gradient-to-r from-[#FF6EA7]/30 via-[#E02875]/35 to-[#8A0C43]/40 border border-[#FF7AA8]/50 text-white px-4 py-3 text-sm shadow-[0_4px_20px_rgba(240,80,140,0.2)] backdrop-blur-md">
                           {msg.content}
                         </div>
                       </div>
@@ -263,7 +272,7 @@ export default function Home() {
                             />
                           )
                         ) : (
-                          <div className="p-4 rounded-xl bg-surface border border-surfaceBorder text-sm text-slate-300">
+                          <div className="p-4 rounded-2xl bg-[#320620]/80 border border-[#7D1B4D]/50 text-sm text-[#FFE4ED]">
                             {msg.content}
                           </div>
                         )}
@@ -276,8 +285,8 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Sticky Composer */}
-            <div className="p-4 bg-background/90 backdrop-blur-md border-t border-surfaceBorder shrink-0">
+            {/* Sticky Bottom Composer */}
+            <div className="p-4 bg-transparent shrink-0">
               <div className="max-w-3xl mx-auto">
                 <Composer
                   onSend={handleSendMessage}
@@ -291,7 +300,7 @@ export default function Home() {
 
           {/* Zone 3: Evidence Panel (Collapsible) */}
           {showEvidencePanel && (
-            <div className="w-full lg:w-[480px] xl:w-[540px] shrink-0 h-full">
+            <div className="w-full lg:w-[460px] xl:w-[500px] shrink-0 h-full relative z-20">
               <EvidencePanel
                 citation={selectedCitation}
                 allCitations={allCurrentCitations}
@@ -307,4 +316,3 @@ export default function Home() {
     </div>
   );
 }
-

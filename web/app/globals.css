@@ -3,12 +3,13 @@
 @tailwind utilities;
 
 :root {
-  --background: #0B0D12;
-  --surface: #12151C;
-  --surface-border: rgba(255, 255, 255, 0.08);
-  --foreground: #E2E8F0;
-  --muted: #94A3B8;
-  --accent: #6366F1;
+  --background: #1A0312;
+  --surface: rgba(45, 8, 30, 0.72);
+  --surface-border: rgba(255, 110, 165, 0.22);
+  --foreground: #FFF0F5;
+  --muted: #D4A5B8;
+  --accent: #F0508C;
+  --accent-glow: rgba(240, 80, 140, 0.35);
 }
 
 body {
@@ -18,41 +19,85 @@ body {
   overflow-x: hidden;
 }
 
+/* Glassmorphism card utilities */
+.glass-panel {
+  background: rgba(42, 6, 27, 0.72);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 110, 165, 0.2);
+}
+
+.glass-card {
+  background: rgba(55, 10, 36, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 120, 170, 0.22);
+}
+
+.glass-card:hover {
+  background: rgba(78, 15, 52, 0.78);
+  border-color: rgba(255, 135, 185, 0.45);
+}
+
+.glass-input {
+  background: rgba(38, 5, 25, 0.82);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 110, 165, 0.3);
+}
+
+/* Pill gradient button */
+.btn-pill-gradient {
+  background: linear-gradient(135deg, #FF6EA7 0%, #E02875 100%);
+  color: #FFFFFF;
+  box-shadow: 0 4px 15px -1px rgba(224, 40, 117, 0.4);
+  transition: all 0.2s ease;
+}
+
+.btn-pill-gradient:hover {
+  background: linear-gradient(135deg, #FF7FB2 0%, #F03584 100%);
+  box-shadow: 0 6px 20px 0 rgba(240, 53, 132, 0.55);
+  transform: translateY(-1px);
+}
+
+.btn-pill-gradient:active {
+  transform: translateY(0);
+}
+
 /* Tabular numerals for stats and tables */
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
 
-/* Custom sleek scrollbar */
+/* Custom sleek scrollbar in rose/maroon tone */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(25, 3, 16, 0.6);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 110, 165, 0.25);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 110, 165, 0.45);
 }
 
 /* Evidence page highlight pulse animation */
 @keyframes highlightGlow {
   0%, 100% {
-    box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.4);
+    box-shadow: 0 0 0 0 rgba(240, 80, 140, 0.5);
   }
   50% {
-    box-shadow: 0 0 0 6px rgba(234, 179, 8, 0.1);
+    box-shadow: 0 0 0 8px rgba(240, 80, 140, 0.15);
   }
 }
 
 .pulse-evidence {
   animation: highlightGlow 2s infinite ease-in-out;
 }
-

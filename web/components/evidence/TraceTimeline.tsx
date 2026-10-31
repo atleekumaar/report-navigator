@@ -2,7 +2,7 @@
 
 import React from "react";
 import { RetrievalTrace } from "@/lib/types";
-import { Sparkles, Search, Layers, FileText, Table } from "lucide-react";
+import { Sparkles, Layers, FileText, Table } from "lucide-react";
 
 interface TraceTimelineProps {
   trace?: RetrievalTrace;
@@ -11,7 +11,7 @@ interface TraceTimelineProps {
 export const TraceTimeline: React.FC<TraceTimelineProps> = ({ trace }) => {
   if (!trace) {
     return (
-      <div className="p-8 text-center text-xs text-slate-500">
+      <div className="p-8 text-center text-xs text-[#FFA8C7]/60">
         No retrieval trace available for this query.
       </div>
     );
@@ -20,23 +20,23 @@ export const TraceTimeline: React.FC<TraceTimelineProps> = ({ trace }) => {
   return (
     <div className="space-y-4 text-xs">
       {/* Rewritten Queries */}
-      <div className="p-3 rounded-lg bg-surface border border-surfaceBorder space-y-2">
-        <div className="flex items-center gap-1.5 font-semibold text-slate-300">
-          <Sparkles className="w-3.5 h-3.5 text-accent" />
+      <div className="p-3.5 rounded-2xl bg-[#320620]/80 border border-[#7D1B4D]/45 space-y-2.5 backdrop-blur-md">
+        <div className="flex items-center gap-1.5 font-bold text-white">
+          <Sparkles className="w-3.5 h-3.5 text-[#FF6EA7]" />
           <span>Stage 3: Query Rewriting</span>
         </div>
-        <div className="text-slate-400">
-          <span className="text-slate-500">Standalone query:</span>{" "}
-          <span className="text-slate-200 font-medium">&ldquo;{trace.standalone_query}&rdquo;</span>
+        <div className="text-[#FFF0F5]">
+          <span className="text-[#D89AB3]">Standalone query:</span>{" "}
+          <span className="text-white font-medium">&ldquo;{trace.standalone_query}&rdquo;</span>
         </div>
         {trace.keywords?.length > 0 && (
           <div>
-            <span className="text-slate-500">Search keywords:</span>
-            <div className="flex flex-wrap gap-1.5 mt-1">
+            <span className="text-[#D89AB3]">Search keywords:</span>
+            <div className="flex flex-wrap gap-1.5 mt-1.5">
               {trace.keywords.map((k, idx) => (
                 <span
                   key={idx}
-                  className="px-2 py-0.5 rounded bg-black/40 border border-white/5 font-mono text-[11px] text-slate-300"
+                  className="px-2 py-0.5 rounded-lg bg-[#200315] border border-[#7D1B4D]/40 font-mono text-[11px] text-[#FFA8C7]"
                 >
                   {k}
                 </span>
@@ -47,36 +47,40 @@ export const TraceTimeline: React.FC<TraceTimelineProps> = ({ trace }) => {
       </div>
 
       {/* Top Retrieved Chunks */}
-      <div className="p-3 rounded-lg bg-surface border border-surfaceBorder space-y-2.5">
-        <div className="flex items-center justify-between font-semibold text-slate-300">
+      <div className="p-3.5 rounded-2xl bg-[#320620]/80 border border-[#7D1B4D]/45 space-y-2.5 backdrop-blur-md">
+        <div className="flex items-center justify-between font-bold text-white">
           <div className="flex items-center gap-1.5">
-            <Layers className="w-3.5 h-3.5 text-indigo-400" />
+            <Layers className="w-3.5 h-3.5 text-[#FF7AA8]" />
             <span>Stages 4 & 5: Fused Candidates ({trace.num_retrieved})</span>
           </div>
-          <span className="text-[11px] text-slate-500 font-mono">Cross-encoder Score</span>
+          <span className="text-[10px] text-[#FFA8C7] font-mono">Score</span>
         </div>
 
         <div className="space-y-2">
           {trace.top_sources?.map((s, idx) => (
             <div
               key={idx}
-              className="flex items-center justify-between p-2 rounded bg-black/25 border border-white/5 text-slate-300"
+              className="flex items-center justify-between p-2.5 rounded-xl bg-[#200315] border border-[#7D1B4D]/35 text-[#FFF0F5]"
             >
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-accent font-semibold">{s.source_id}</span>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="font-mono text-[#FF6EA7] font-bold text-[11px] shrink-0">
+                  {s.source_id}
+                </span>
                 {s.type === "table" ? (
-                  <Table className="w-3.5 h-3.5 text-indigo-400" />
+                  <Table className="w-3.5 h-3.5 text-[#FF7AA8] shrink-0" />
                 ) : (
-                  <FileText className="w-3.5 h-3.5 text-emerald-400" />
+                  <FileText className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                 )}
-                <span>
-                  Page {s.label} (PDF p.{s.page})
+                <span className="font-medium text-xs shrink-0">
+                  Page {s.label || s.page} (p.{s.page})
                 </span>
-                <span className="text-slate-500 truncate max-w-[120px]">
-                  {s.section}
-                </span>
+                {s.section && (
+                  <span className="text-[#D89AB3] text-[11px] truncate max-w-[140px]">
+                    {s.section}
+                  </span>
+                )}
               </div>
-              <span className="font-mono text-slate-400 tabular-nums">
+              <span className="font-mono text-[#FFA8C7] tabular-nums font-semibold shrink-0">
                 {s.score !== undefined ? s.score.toFixed(3) : "—"}
               </span>
             </div>
@@ -86,5 +90,3 @@ export const TraceTimeline: React.FC<TraceTimelineProps> = ({ trace }) => {
     </div>
   );
 };
-
-

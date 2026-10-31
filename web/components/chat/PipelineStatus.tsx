@@ -21,9 +21,9 @@ export const PipelineStatus: React.FC<PipelineStatusProps> = ({ currentStep }) =
     : 0;
 
   return (
-    <div className="my-3 p-4 rounded-xl bg-surface/90 border border-surfaceBorder shadow-lg backdrop-blur-md">
-      <div className="flex items-center gap-2 mb-3 text-xs font-semibold tracking-wider uppercase text-accent">
-        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+    <div className="my-3 p-4 rounded-2xl bg-[#2D061E]/85 border border-[#801B4F]/50 shadow-[0_10px_30px_rgba(15,0,10,0.5)] backdrop-blur-xl">
+      <div className="flex items-center gap-2 mb-3 text-xs font-bold tracking-wider uppercase text-[#FF7AA8]">
+        <Loader2 className="w-3.5 h-3.5 animate-spin text-[#FF6EA7]" />
         <span>Evidence Pipeline In Progress</span>
       </div>
 
@@ -39,25 +39,25 @@ export const PipelineStatus: React.FC<PipelineStatusProps> = ({ currentStep }) =
               key={s.id}
               className={`flex items-center gap-3 text-xs transition-all duration-200 ${
                 isCurrent
-                  ? "text-slate-100 font-medium"
+                  ? "text-white font-semibold"
                   : isDone
-                  ? "text-slate-400"
-                  : "text-slate-600"
+                  ? "text-[#FFA8C7]"
+                  : "text-[#853055]"
               }`}
             >
-              <div className="w-4 h-4 flex items-center justify-center">
+              <div className="w-4 h-4 flex items-center justify-center shrink-0">
                 {isDone ? (
-                  <CheckCircle2 className="w-4 h-4 text-verified" />
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                 ) : isCurrent ? (
-                  <Loader2 className="w-4 h-4 text-accent animate-spin" />
+                  <Loader2 className="w-4 h-4 text-[#FF6EA7] animate-spin" />
                 ) : (
-                  <div className="w-2 h-2 rounded-full bg-slate-700" />
+                  <div className="w-2 h-2 rounded-full bg-[#45092C]" />
                 )}
               </div>
-              <Icon className="w-3.5 h-3.5" />
+              <Icon className="w-3.5 h-3.5 text-[#FFA8C7]" />
               <span>{s.label}</span>
               {isCurrent && currentStep?.message && (
-                <span className="text-[11px] text-accent/90 italic truncate max-w-xs">
+                <span className="text-[11px] text-[#FFA3C5] italic truncate max-w-xs font-mono">
                   — {currentStep.message}
                 </span>
               )}
@@ -68,4 +68,3 @@ export const PipelineStatus: React.FC<PipelineStatusProps> = ({ currentStep }) =
     </div>
   );
 };
-
