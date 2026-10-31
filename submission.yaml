@@ -1,0 +1,7 @@
+team: report-navigator
+problem: p5
+entry: "python predict.py --pdf {pdf_path} --questions {questions_jsonl} --output {answers_jsonl}"
+python: "3.12"
+extra_downloads: []
+train_cmd: "python train.py --data-dir {data_dir} --out models/"
+

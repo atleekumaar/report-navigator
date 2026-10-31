@@ -29,6 +29,7 @@ index_store/*.pkl
 index_store/chunks.jsonl
 !index_store/.gitkeep
 data/*.pdf
+data/predicted_answers.jsonl
 !data/.gitkeep
 
 # Environment variables
