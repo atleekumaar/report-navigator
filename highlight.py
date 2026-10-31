@@ -1,7 +1,10 @@
 import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
-import fitz  # PyMuPDF
+try:
+    import pymupdf as fitz
+except ImportError:
+    import fitz
 from PIL import Image
 import io
 

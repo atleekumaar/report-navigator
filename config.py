@@ -26,6 +26,14 @@ MIN_CHUNK_CHARS = 100
 TABLE_MAX_ROWS_PER_PART = 14
 HEADER_FOOTER_MARGIN_PERCENT = 0.06  # top/bottom 6% of page considered header/footer
 
+# Table extraction strategy: "lines" (default, ruled tables) or "text" (unruled tables)
+# Switch to "text" if find_tables() misses tables in the real PDF
+TABLE_STRATEGY = os.getenv("TABLE_STRATEGY", "lines")
+
+# OCR fallback: trigger on pages with fewer than this many characters
+OCR_MIN_CHARS = int(os.getenv("OCR_MIN_CHARS", "30"))
+OCR_ENABLED = os.getenv("OCR_ENABLED", "1").lower() in ("1", "true", "yes")
+
 # Embedding & Rerank Models
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
 RERANK_MODEL_NAME = os.getenv("RERANK_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
@@ -36,6 +44,10 @@ DENSE_TOP_K = 30
 FUSED_POOL_SIZE = 30
 FINAL_TOP_K = 8
 RRF_K = 60
+
+# Retrieval quality gates — minimum coverage scores below which we flag low confidence
+MIN_COVERAGE_BM25 = float(os.getenv("MIN_COVERAGE_BM25", "0.5"))
+MIN_COVERAGE_RERANK = float(os.getenv("MIN_COVERAGE_RERANK", "0.3"))
 
 # Feature Toggles
 USE_DENSE = os.getenv("USE_DENSE", "1").lower() in ("1", "true", "yes")
@@ -51,7 +63,49 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 LLM_MODEL_ANSWER = os.getenv("LLM_MODEL_ANSWER", "claude-3-5-sonnet-20241022")
 LLM_MODEL_REWRITE = os.getenv("LLM_MODEL_REWRITE", "claude-3-5-haiku-20241022")
 
+# Gemini model names (used when LLM_PROVIDER=gemini)
+GEMINI_MODEL_ANSWER = os.getenv("GEMINI_MODEL_ANSWER", "gemini-2.5-flash")
+GEMINI_MODEL_REWRITE = os.getenv("GEMINI_MODEL_REWRITE", "gemini-2.5-flash")
+
 # API Server
 HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", "8000"))
 
+# ---------------------------------------------------------------------------
+# Synonym dictionary for query expansion in BM25 search
+# Maps common alternative phrasings to canonical terms found in statistical reports.
+# Both directions are expanded at search time.
+# ---------------------------------------------------------------------------
+SYNONYMS = {
+    # Employment / Labour
+    "unemployment": ["joblessness", "jobless", "unemployed", "without work", "out of work"],
+    "employment": ["employed", "jobs", "job", "working", "workforce participation"],
+    "lfpr": ["labour force participation rate", "labor force participation rate", "work participation"],
+    "labour": ["labor"],
+    "workforce": ["work force", "labor force", "labour force"],
+
+    # Demographics
+    "female": ["women", "woman", "girls", "girl"],
+    "male": ["men", "man", "boys", "boy"],
+    "youth": ["young", "young people", "adolescent", "15-29", "15-24"],
+    "rural": ["village", "villages", "countryside"],
+    "urban": ["city", "cities", "town", "towns", "metropolitan"],
+
+    # Statistics
+    "rate": ["percentage", "percent", "per cent", "ratio", "proportion"],
+    "average": ["mean", "avg"],
+    "highest": ["maximum", "max", "top", "most", "largest", "greatest"],
+    "lowest": ["minimum", "min", "bottom", "least", "smallest"],
+    "increase": ["rise", "grew", "growth", "risen", "increased", "up"],
+    "decrease": ["fall", "fell", "decline", "declined", "dropped", "down", "reduced"],
+    "compare": ["comparison", "versus", "vs", "difference", "gap"],
+
+    # Geography (Indian states — extend for specific report)
+    "india": ["nation", "national", "country", "all india", "nationwide"],
+
+    # Report structure
+    "table": ["statement", "tabulation", "exhibit"],
+    "chapter": ["section", "part"],
+    "figure": ["chart", "graph", "diagram"],
+    "annexure": ["appendix", "annex"],
+}

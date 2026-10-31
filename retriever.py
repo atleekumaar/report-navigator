@@ -5,6 +5,7 @@ import numpy as np
 import config
 from index import Indexer, tokenize_for_bm25, build_contextual_text
 
+
 class HybridRetriever:
     def __init__(self, indexer: Optional[Indexer] = None):
         if indexer is None:
@@ -34,11 +35,20 @@ class HybridRetriever:
             pinned.add(int(m))
         return pinned
 
+    def detect_table_references(self, query: str) -> Set[str]:
+        """Detect explicit table references in the query, e.g. 'Table 3.1', 'table 5'."""
+        refs = set()
+        matches = re.findall(r'\btable\s+(\d+(?:\.\d+)?)\b', query, re.IGNORECASE)
+        for m in matches:
+            refs.add(m)
+        return refs
+
     def search_bm25(self, query: str, top_k: int = config.BM25_TOP_K) -> List[Tuple[int, float]]:
-        """Run BM25 search returning list of (chunk_idx, score)."""
+        """Run BM25 search returning list of (chunk_idx, score). Uses synonym expansion."""
         if self.indexer.bm25 is None or not self.indexer.chunks:
             return []
-        tokens = tokenize_for_bm25(query)
+        # Use synonym expansion at query time for better recall
+        tokens = tokenize_for_bm25(query, use_synonyms=True)
         if not tokens:
             return []
         scores = self.indexer.bm25.get_scores(tokens)
@@ -50,8 +60,12 @@ class HybridRetriever:
         if not config.USE_DENSE or self.indexer.embeddings is None or len(self.indexer.embeddings) == 0:
             return []
         if self.indexer.embed_model is None:
-            from sentence_transformers import SentenceTransformer
-            self.indexer.embed_model = SentenceTransformer(config.EMBEDDING_MODEL_NAME)
+            try:
+                from sentence_transformers import SentenceTransformer
+                self.indexer.embed_model = SentenceTransformer(config.EMBEDDING_MODEL_NAME)
+            except Exception as e:
+                print(f"[Retriever] Failed to load embedding model: {e}")
+                return []
 
         query_vec = self.indexer.embed_model.encode([query], normalize_embeddings=True)[0]
         # Dot product with normalized vectors equals cosine similarity
@@ -91,6 +105,8 @@ class HybridRetriever:
         existing_set = set(candidate_indices)
 
         for idx in candidate_indices:
+            if idx >= len(self.indexer.chunks):
+                continue
             chunk = self.indexer.chunks[idx]
             table_id = chunk.get("table_id")
             if table_id:
@@ -117,8 +133,13 @@ class HybridRetriever:
         if not queries:
             return {"chunks": [], "trace": {}}
 
+        if not self.indexer.chunks:
+            print("[Retriever] Warning: No chunks loaded.")
+            return {"chunks": [], "trace": {"error": "no_chunks_loaded"}}
+
         primary_query = queries[0]
         pinned_pages = self.detect_pinned_pages(primary_query)
+        table_refs = self.detect_table_references(primary_query)
 
         all_rankings = []
         trace_rankings = {}
@@ -132,7 +153,9 @@ class HybridRetriever:
                 all_rankings.append(dense_res)
             trace_rankings[q] = {
                 "bm25_count": len(bm25_res),
-                "dense_count": len(dense_res)
+                "dense_count": len(dense_res),
+                "bm25_top_score": round(bm25_res[0][1], 4) if bm25_res else 0.0,
+                "dense_top_score": round(dense_res[0][1], 4) if dense_res else 0.0,
             }
 
         if not all_rankings:
@@ -155,6 +178,20 @@ class HybridRetriever:
                     boosted.append((chunk_idx, score))
             top_candidates = sorted(boosted, key=lambda x: x[1], reverse=True)
 
+        # Apply table reference boost
+        if table_refs:
+            boosted = []
+            for chunk_idx, score in top_candidates:
+                chunk = self.indexer.chunks[chunk_idx]
+                caption = (chunk.get("caption") or "").lower()
+                table_id = (chunk.get("table_id") or "").lower()
+                for ref in table_refs:
+                    if ref in caption or ref in table_id or f"table {ref}" in chunk.get("text", "").lower()[:200]:
+                        score += 0.8
+                        break
+                boosted.append((chunk_idx, score))
+            top_candidates = sorted(boosted, key=lambda x: x[1], reverse=True)
+
         candidate_indices = [idx for idx, _ in top_candidates]
 
         # Sibling table expansion
@@ -168,15 +205,32 @@ class HybridRetriever:
                 chunk = self.indexer.chunks[idx]
                 chunk_repr = build_contextual_text(chunk)
                 pairs.append((primary_query, chunk_repr))
-            rerank_scores = self.reranker.predict(pairs)
-            for idx, score in zip(expanded_indices, rerank_scores):
-                scored_candidates.append((idx, float(score)))
-            scored_candidates.sort(key=lambda x: x[1], reverse=True)
-            final_indices = [idx for idx, _ in scored_candidates[:top_k]]
+            try:
+                rerank_scores = self.reranker.predict(pairs)
+                for idx, score in zip(expanded_indices, rerank_scores):
+                    scored_candidates.append((idx, float(score)))
+                scored_candidates.sort(key=lambda x: x[1], reverse=True)
+                final_indices = [idx for idx, _ in scored_candidates[:top_k]]
+            except Exception as e:
+                print(f"[Retriever] Reranking failed: {e}. Using RRF scores.")
+                final_indices = expanded_indices[:top_k]
+                rrf_dict = dict(top_candidates)
+                scored_candidates = [(idx, rrf_dict.get(idx, 0.0)) for idx in final_indices]
         else:
             final_indices = expanded_indices[:top_k]
             rrf_dict = dict(top_candidates)
             scored_candidates = [(idx, rrf_dict.get(idx, 0.0)) for idx in final_indices]
+
+        # Coverage quality check
+        retrieval_quality = "good"
+        if scored_candidates:
+            top_score = scored_candidates[0][1]
+            if use_rerank and self.reranker is not None:
+                if top_score < config.MIN_COVERAGE_RERANK:
+                    retrieval_quality = "low"
+            else:
+                if top_score < config.MIN_COVERAGE_BM25:
+                    retrieval_quality = "low"
 
         # Build output chunk payloads
         final_chunks = []
@@ -189,8 +243,10 @@ class HybridRetriever:
         trace = {
             "queries": queries,
             "pinned_pages": list(pinned_pages),
+            "table_refs": list(table_refs),
             "rerank_applied": use_rerank and (self.reranker is not None),
             "total_candidates": len(expanded_indices),
+            "retrieval_quality": retrieval_quality,
             "trace_rankings": trace_rankings
         }
 

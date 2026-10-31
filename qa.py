@@ -1,7 +1,8 @@
 import json
 import re
-from typing import List, Dict, Any, Optional, Tuple
 import os
+from typing import List, Dict, Any, Optional, Tuple
+import httpx
 
 import config
 from retriever import HybridRetriever
@@ -44,15 +45,24 @@ You MUST respond with valid JSON matching this schema:
   ]
 }"""
 
+
 def clean_for_quote_matching(s: str) -> str:
     """Normalize text for quote matching tolerance."""
     s = s.replace("|", " ").replace("---", " ")
+    s = re.sub(r'[,;:()\[\]{}"\']', ' ', s)
     s = re.sub(r'\s+', ' ', s)
     return s.strip().lower()
+
 
 def extract_numbers(s: str) -> List[str]:
     """Extract all numbers (integers, decimals, percentages) from a string."""
     return re.findall(r'\b\d+(?:\.\d+)?%?', s)
+
+
+def norm_num(n: str) -> str:
+    """Normalize number representation by stripping non-numeric characters except dot."""
+    return re.sub(r'[^\d.]', '', n)
+
 
 def verify_citations(
     citations: List[Dict[str, Any]],
@@ -62,7 +72,7 @@ def verify_citations(
 ) -> Tuple[List[Dict[str, Any]], bool, bool]:
     """
     Anti-hallucination verification layer:
-    1. Check if cited quotes exist inside the cited chunks (tolerant to whitespace/pipes).
+    1. Check if cited quotes exist inside the cited chunks (tolerant to whitespace/pipes/punctuation).
     2. Check that all numbers in the quote exist in the chunk.
     3. Check that numbers in answer appear in sources (unless calculation provided).
     
@@ -71,9 +81,9 @@ def verify_citations(
     verified_citations = []
     any_verified = False
 
-    all_source_text = " ".join([s["chunk"]["text"] for s in source_map.values()])
+    all_source_text = " ".join([s["chunk"].get("text", "") for s in source_map.values()])
     all_source_numbers = set(extract_numbers(all_source_text))
-    # Also include page indices and labels so page references aren't flagged as hallucinated numbers
+    # Include page indices and labels so page references aren't flagged as hallucinated numbers
     for s in source_map.values():
         p = s["chunk"].get("page")
         lbl = s["chunk"].get("label")
@@ -81,8 +91,6 @@ def verify_citations(
             all_source_numbers.add(str(p))
         if lbl is not None:
             all_source_numbers.add(str(lbl))
-
-    norm_num = lambda n: re.sub(r'[^\d.]', '', n)
 
     for cit in citations:
         sid = cit.get("source_id", "")
@@ -97,22 +105,28 @@ def verify_citations(
         elif not quote:
             reason = "Empty quote provided"
         else:
-            chunk_text = source_entry["chunk"]["text"]
+            chunk_text = source_entry["chunk"].get("text", "")
             norm_quote = clean_for_quote_matching(quote)
             norm_chunk = clean_for_quote_matching(chunk_text)
 
-            # Check quote presence
+            # 1. Exact or normalized substring match
             if norm_quote in norm_chunk:
                 is_verified = True
             else:
-                # Check if words in quote match in sequence
+                # 2. Sliding window / prefix match for long quotes
                 words = norm_quote.split()
                 if len(words) >= 4:
                     prefix = " ".join(words[:4])
                     if prefix in norm_chunk:
                         is_verified = True
+                if not is_verified and len(words) >= 3:
+                    # Check if at least 75% of words are present in chunk
+                    chunk_word_set = set(norm_chunk.split())
+                    matched_words = [w for w in words if w in chunk_word_set]
+                    if len(matched_words) / len(words) >= 0.75:
+                        is_verified = True
 
-            # Number consistency check in quote (normalized for % and decimals)
+            # 3. Number consistency check in quote
             quote_nums = [norm_num(n) for n in extract_numbers(quote) if norm_num(n)]
             chunk_nums = {norm_num(n) for n in extract_numbers(chunk_text) if norm_num(n)}
             for qn in quote_nums:
@@ -128,9 +142,9 @@ def verify_citations(
             "source_id": sid,
             "quote": quote,
             "verified": is_verified,
-            "page": source_entry["chunk"]["page"] if source_entry else None,
+            "page": source_entry["chunk"].get("page") if source_entry else None,
             "label": source_entry["chunk"].get("label") if source_entry else None,
-            "type": source_entry["chunk"].get("type") if source_entry else "text",
+            "type": source_entry["chunk"].get("type", "text") if source_entry else "text",
             "rects": source_entry["chunk"].get("rects", []) if source_entry else [],
             "reason": reason
         })
@@ -149,27 +163,44 @@ def verify_citations(
 
     return verified_citations, any_verified, has_number_warning
 
+
 class QAEngine:
     def __init__(self, retriever: Optional[HybridRetriever] = None):
         self.retriever = retriever or HybridRetriever()
 
+    def get_api_key(self, provider: str) -> str:
+        """Helper to get API key from config or environment with fallback alias."""
+        if provider == "gemini":
+            return config.GEMINI_API_KEY or os.getenv("GOOGLE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
+        elif provider == "openai":
+            return config.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY", "")
+        elif provider == "anthropic":
+            return config.ANTHROPIC_API_KEY or os.getenv("ANTHROPIC_API_KEY", "")
+        return ""
+
     def rewrite_query(self, query: str, history: List[Dict[str, str]] = None) -> Dict[str, Any]:
         """
         Rewrite query for context-awareness and keyword generation.
+        Supports Anthropic, OpenAI, and Gemini. Falls back to raw query if no key is configured.
         """
         if not config.USE_REWRITE or not history:
             return {"standalone": query, "keywords": [query]}
 
-        # If LLM API key not configured, fallback gracefully
-        if not config.ANTHROPIC_API_KEY and not config.OPENAI_API_KEY:
+        gemini_key = self.get_api_key("gemini")
+        openai_key = self.get_api_key("openai")
+        anthropic_key = self.get_api_key("anthropic")
+
+        if not (anthropic_key or openai_key or gemini_key):
             return {"standalone": query, "keywords": [query]}
 
-        try:
-            if config.LLM_PROVIDER == "anthropic" and config.ANTHROPIC_API_KEY:
+        hist_str = "\n".join([f"{m.get('role', 'user')}: {m.get('content', '')}" for m in history[-6:]])
+        prompt = f"Chat History:\n{hist_str}\n\nLatest question: {query}"
+
+        # 1. Anthropic
+        if (config.LLM_PROVIDER == "anthropic" or anthropic_key) and anthropic_key:
+            try:
                 import anthropic
-                client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-                hist_str = "\n".join([f"{m.get('role', 'user')}: {m.get('content', '')}" for m in history[-6:]])
-                prompt = f"Chat History:\n{hist_str}\n\nLatest question: {query}"
+                client = anthropic.Anthropic(api_key=anthropic_key)
                 resp = client.messages.create(
                     model=config.LLM_MODEL_REWRITE,
                     max_tokens=256,
@@ -177,10 +208,47 @@ class QAEngine:
                     messages=[{"role": "user", "content": prompt}]
                 )
                 txt = resp.content[0].text
-                data = json.loads(re.search(r'\{.*\}', txt, re.DOTALL).group(0))
-                return data
-        except Exception as e:
-            print(f"[QA] Rewrite warning: {e}. Using raw question.")
+                match = re.search(r'\{.*\}', txt, re.DOTALL)
+                if match:
+                    return json.loads(match.group(0))
+            except Exception as e:
+                print(f"[QA] Anthropic rewrite warning: {e}")
+
+        # 2. Gemini
+        if gemini_key:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL_REWRITE}:generateContent?key={gemini_key}"
+                payload = {
+                    "contents": [{"parts": [{"text": f"{REWRITE_SYSTEM_PROMPT}\n\n{prompt}"}]}],
+                    "generationConfig": {"response_mime_type": "application/json"}
+                }
+                res = httpx.post(url, json=payload, timeout=15.0)
+                if res.status_code == 200:
+                    data = res.json()
+                    raw = data["candidates"][0]["content"]["parts"][0]["text"]
+                    return json.loads(raw)
+            except Exception as e:
+                print(f"[QA] Gemini rewrite warning: {e}")
+
+        # 3. OpenAI
+        if openai_key:
+            try:
+                headers = {"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"}
+                payload = {
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {"role": "system", "content": REWRITE_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "response_format": {"type": "json_object"}
+                }
+                res = httpx.post("https://api.openai.com/v1/chat/completions", json=payload, headers=headers, timeout=15.0)
+                if res.status_code == 200:
+                    data = res.json()
+                    content = data["choices"][0]["message"]["content"]
+                    return json.loads(content)
+            except Exception as e:
+                print(f"[QA] OpenAI rewrite warning: {e}")
 
         return {"standalone": query, "keywords": [query]}
 
@@ -195,7 +263,7 @@ class QAEngine:
             label = chunk.get("label", str(page))
             c_type = chunk.get("type", "text")
             section = chunk.get("section", "General")
-            
+
             header = f"[{sid}] (p.{label} (PDF p.{page}) | {c_type} | section: {section})"
             body = chunk.get("text", "")
             source_texts.append(f"{header}\n{body}\n")
@@ -207,123 +275,197 @@ class QAEngine:
         return "\n".join(source_texts), source_map
 
     def call_llm(self, prompt: str) -> Dict[str, Any]:
-        """Call LLM with forced JSON schema output."""
-        # Check Anthropic
-        if config.LLM_PROVIDER == "anthropic" and config.ANTHROPIC_API_KEY:
-            import anthropic
-            client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-            response = client.messages.create(
-                model=config.LLM_MODEL_ANSWER,
-                max_tokens=1024,
-                system=QA_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            raw_text = response.content[0].text
-            json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
-            if json_match:
-                return json.loads(json_match.group(0))
+        """
+        Call LLM with forced JSON schema output.
+        Tries configured provider, falls back across providers, and finally uses
+        dynamic evidence-based extraction if no API keys are available or on network failure.
+        """
+        gemini_key = self.get_api_key("gemini")
+        openai_key = self.get_api_key("openai")
+        anthropic_key = self.get_api_key("anthropic")
 
-        # Check OpenAI
-        if config.OPENAI_API_KEY:
-            import httpx
-            # standard OpenAI call via httpx
-            headers = {"Authorization": f"Bearer {config.OPENAI_API_KEY}", "Content-Type": "application/json"}
-            payload = {
-                "model": "gpt-4o-mini",
-                "messages": [
-                    {"role": "system", "content": QA_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt}
-                ],
-                "response_format": {"type": "json_object"}
-            }
-            res = httpx.post("https://api.openai.com/v1/chat/completions", json=payload, headers=headers, timeout=30.0)
-            if res.status_code == 200:
-                data = res.json()
-                content = data["choices"][0]["message"]["content"]
-                return json.loads(content)
+        # 1. Anthropic (if chosen or key present)
+        if (config.LLM_PROVIDER == "anthropic" or (not gemini_key and not openai_key)) and anthropic_key:
+            try:
+                import anthropic
+                client = anthropic.Anthropic(api_key=anthropic_key)
+                response = client.messages.create(
+                    model=config.LLM_MODEL_ANSWER,
+                    max_tokens=1024,
+                    system=QA_SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                raw_text = response.content[0].text
+                json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+                if json_match:
+                    return json.loads(json_match.group(0))
+            except Exception as e:
+                print(f"[QA] Anthropic call failed: {e}")
 
-        # Standalone mock/heuristic mode when no API keys are configured (great for local demo/tests)
-        return self._heuristic_mock_answer(prompt)
+        # 2. Gemini (via direct REST API)
+        if (config.LLM_PROVIDER == "gemini" or gemini_key) and gemini_key:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{config.GEMINI_MODEL_ANSWER}:generateContent?key={gemini_key}"
+                payload = {
+                    "contents": [{"parts": [{"text": f"{QA_SYSTEM_PROMPT}\n\n{prompt}"}]}],
+                    "generationConfig": {"response_mime_type": "application/json"}
+                }
+                res = httpx.post(url, json=payload, timeout=30.0)
+                if res.status_code == 200:
+                    data = res.json()
+                    raw = data["candidates"][0]["content"]["parts"][0]["text"]
+                    json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+                    if json_match:
+                        return json.loads(json_match.group(0))
+                else:
+                    print(f"[QA] Gemini API returned status {res.status_code}: {res.text}")
+            except Exception as e:
+                print(f"[QA] Gemini call failed: {e}")
 
-    def _heuristic_mock_answer(self, prompt: str) -> Dict[str, Any]:
-        """Heuristic answer generator for offline testing when no LLM API key is present."""
+        # 3. OpenAI
+        if openai_key:
+            try:
+                headers = {"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"}
+                payload = {
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {"role": "system", "content": QA_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "response_format": {"type": "json_object"}
+                }
+                res = httpx.post("https://api.openai.com/v1/chat/completions", json=payload, headers=headers, timeout=30.0)
+                if res.status_code == 200:
+                    data = res.json()
+                    content = data["choices"][0]["message"]["content"]
+                    return json.loads(content)
+                else:
+                    print(f"[QA] OpenAI API returned status {res.status_code}: {res.text}")
+            except Exception as e:
+                print(f"[QA] OpenAI call failed: {e}")
+
+        # Fallback: Dynamic evidence-based extractor when offline or without API key
+        return self._dynamic_evidence_answer(prompt)
+
+    def _dynamic_evidence_answer(self, prompt: str) -> Dict[str, Any]:
+        """
+        Intelligent dynamic offline evidence extractor for demo/evaluation without API keys.
+        Extracts facts, numbers, and quotes directly from retrieved sources.
+        """
         parts = prompt.split("Sources:")
-        question_part = parts[0].replace("Question:", "").strip().lower()
+        question_part = parts[0].replace("Question:", "").strip()
         sources_part = parts[1] if len(parts) > 1 else ""
 
-        # Extract informative keywords from question
-        stop_words = {"what", "which", "where", "were", "when", "about", "rate", "year", "average", "total", "state", "figures", "compare", "government", "report", "annual"}
-        q_words = [w for w in re.findall(r'\b[a-zA-Z]{4,}\b', question_part) if w not in stop_words]
+        # Parse sources into [S1], [S2] blocks
+        source_blocks = re.findall(r'(\[S\d+\][^\n]*\n)(.*?)(?=\n\[S\d+\]|\Z)', sources_part, re.DOTALL)
 
-        # Check if question keywords exist as exact words in sources
-        matches = [w for w in q_words if re.search(r'\b' + re.escape(w) + r'\b', sources_part.lower())]
-        if not matches:
+        # Full grammatical and domain stop words
+        stop_words = {
+            "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are",
+            "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between",
+            "both", "but", "by", "can", "can't", "cannot", "could", "couldn't", "did", "didn't",
+            "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for",
+            "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having",
+            "he", "her", "here", "hers", "herself", "him", "himself", "his", "how", "i", "if",
+            "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more",
+            "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once",
+            "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own",
+            "same", "shan't", "she", "should", "shouldn't", "so", "some", "such", "than", "that",
+            "the", "their", "theirs", "them", "themselves", "then", "there", "these", "they",
+            "this", "those", "through", "to", "too", "under", "until", "up", "very", "was",
+            "wasn't", "we", "were", "weren't", "what", "when", "where", "which", "while",
+            "who", "whom", "why", "with", "won't", "would", "wouldn't", "you", "your", "yours",
+            # Domain-generic reporting terms
+            "rate", "year", "years", "average", "total", "figures", "compare", "annual", "report",
+            "percentage", "percent", "per", "cent", "give", "list", "tell", "show", "find", "between",
+            "government", "ministry", "division", "bulletin", "survey", "national", "chapter", "section",
+            "table", "note", "across", "along", "data", "metric", "metrics", "level", "levels"
+        }
+        q_words = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', question_part) if w.lower() not in stop_words]
+
+        # Guardrail: Require that substantive query words match in sources
+        sources_lower = sources_part.lower()
+        matched_q_words = [w for w in q_words if re.search(r'\b' + re.escape(w) + r'\b', sources_lower)]
+        
+        # If no keywords matched, or if question has >= 2 keywords and fewer than 2 (or < 40%) matched, refuse!
+        min_required = 1 if len(q_words) <= 1 else 2
+        if len(matched_q_words) < min_required or (len(q_words) > 2 and len(matched_q_words) / len(q_words) < 0.35):
             return {
                 "found": False,
-                "answer": "Not found in the report. (The requested information is absent from the report sources).",
+                "answer": "Not found in the report. (The requested subject or entity is not mentioned in the report).",
                 "calculation": "",
                 "confidence": "high",
                 "citations": []
             }
 
-        # Check for specific report facts
-        if "kerala" in question_part and "9.9" in sources_part:
+        # Specific demographic or superlative terms that require exact match priority
+        specific_focus_terms = {"female", "male", "women", "men", "youth", "rural", "urban", "lowest", "highest", "minimum", "maximum"}
+        q_focus = [w for w in q_words if w in specific_focus_terms]
+
+        best_source_id = "S1"
+        best_quote = ""
+        best_sentence = ""
+        highest_overlap = 0
+
+        for header, body in source_blocks:
+            sid_match = re.search(r'\[(S\d+)\]', header)
+            sid = sid_match.group(1) if sid_match else "S1"
+
+            # Check lines for tables, or full normalized sentences for prose
+            is_table_block = "|" in body or "Table:" in body
+            if is_table_block:
+                candidates = [ln.strip() for ln in body.splitlines() if ln.strip()]
+            else:
+                # Normalize line breaks within sentences so we get complete sentences with numbers
+                normalized_prose = re.sub(r'(?<!\n)\n(?!\n)', ' ', body)
+                candidates = [s.strip() for s in re.split(r'(?<=[.!?])\s+', normalized_prose) if s.strip()]
+
+            for cand in candidates:
+                cand_lower = cand.lower()
+                # Count matching substantive query terms
+                overlap = sum(1 for w in q_words if re.search(r'\b' + re.escape(w) + r'\b', cand_lower))
+                if overlap == 0:
+                    continue  # Zero substantive match -> cannot be evidence
+
+                has_nums = bool(re.search(r'\d+(?:\.\d+)?%?', cand))
+                # Boost if candidate matches specific user focus terms (e.g. female, male, lowest, highest)
+                focus_boost = sum(6 for ft in q_focus if re.search(r'\b' + re.escape(ft) + r'\b', cand_lower))
+                score = overlap * 4 + (5 if has_nums else 0) + focus_boost
+
+                if score > highest_overlap:
+                    highest_overlap = score
+                    best_source_id = sid
+                    best_quote = cand[:190]
+                    best_sentence = cand
+
+        # If keyword overlap is zero or very low, abstain safely
+        if highest_overlap == 0 or not best_quote:
             return {
-                "found": True,
-                "answer": "Kerala's total unemployment rate in 2024 was 9.9 per cent [S1].",
+                "found": False,
+                "answer": "Not found in the report. (The requested information is not present in the provided report sources).",
                 "calculation": "",
                 "confidence": "high",
-                "citations": [
-                    {
-                        "source_id": "S1",
-                        "quote": "In Kerala, the total unemployment rate for the calendar year 2024 was recorded at 9.9 per cent."
-                    }
-                ]
+                "citations": []
             }
 
-        if "participation" in question_part or "lfpr" in question_part:
-            return {
-                "found": True,
-                "answer": "The nationwide Labour Force Participation Rate (LFPR) in 2024 stood at 56.4 per cent, with urban female participation at 28.5 per cent [S1].",
-                "calculation": "",
-                "confidence": "high",
-                "citations": [
-                    {
-                        "source_id": "S1",
-                        "quote": "nationwide Labour Force Participation Rate (LFPR) for persons aged 15 years and above stood at 56.4 per cent"
-                    }
-                ]
-            }
-
-        if "lowest" in question_part:
-            return {
-                "found": True,
-                "answer": "Gujarat recorded the lowest overall unemployment rate at 3.8 per cent [S1].",
-                "calculation": "",
-                "confidence": "high",
-                "citations": [
-                    {
-                        "source_id": "S1",
-                        "quote": "Gujarat recorded the lowest overall unemployment at 3.8 per cent."
-                    }
-                ]
-            }
-
-        # General evidence snippet from first source
-        first_quote = ""
-        s1_match = re.search(r'\[S1\].*?\n(.*?)\n', sources_part)
-        if s1_match:
-            first_quote = s1_match.group(1)[:120].strip()
+        # Formulate answer with citation tag
+        clean_sentence = re.sub(r'^[|\s\-]+|[|\s\-]+$', '', best_sentence)
+        if "|" in clean_sentence:
+            # Table row: format clearly
+            cells = [c.strip() for c in clean_sentence.split("|") if c.strip()]
+            answer = f"According to the report, {', '.join(cells)} [{best_source_id}]."
+        else:
+            answer = f"{clean_sentence} [{best_source_id}]."
 
         return {
             "found": True,
-            "answer": f"Retrieved statistical evidence from report sources [S1].",
+            "answer": answer,
             "calculation": "",
             "confidence": "medium",
             "citations": [
                 {
-                    "source_id": "S1",
-                    "quote": first_quote or "Statistical evidence from document"
+                    "source_id": best_source_id,
+                    "quote": best_quote
                 }
             ]
         }
@@ -331,21 +473,25 @@ class QAEngine:
     def answer(
         self,
         query: str,
-        history: Optional[List[Dict[str, str]]] = None,
-        use_rerank: bool = config.USE_RERANK,
-        on_status: Optional[callable] = None
+        history: List[Dict[str, str]] = None,
+        use_rerank: bool = True,
+        on_status: Any = None
     ) -> Dict[str, Any]:
         """
-        Full end-to-end pipeline execution:
-        Rewrite -> Retrieve -> Rerank -> LLM Generation -> Verification
+        Complete end-to-end question answering pipeline:
+        1. Context-aware rewrite & search keyword expansion
+        2. Hybrid BM25 + dense retrieval
+        3. Reranking & quality gating
+        4. Grounded LLM generation with strict JSON schema
+        5. Anti-hallucination citation verification & page chips
         """
-        # Step 1: Rewriting
+        # Step 1: Query understanding
         if on_status:
-            on_status("rewriting", "Understanding question and context...")
-        rewrite_res = self.rewrite_query(query, history)
-        standalone_q = rewrite_res.get("standalone", query)
-        keyword_queries = rewrite_res.get("keywords", [query])
-        search_queries = [standalone_q] + [k for k in keyword_queries if k != standalone_q]
+            on_status("rewriting", "Analyzing query and context...")
+        rewrite_data = self.rewrite_query(query, history)
+        standalone_q = rewrite_data.get("standalone", query)
+        keyword_queries = rewrite_data.get("keywords", [standalone_q])
+        search_queries = list(set([standalone_q] + keyword_queries))
 
         # Step 2 & 3: Retrieval & Reranking
         if on_status:
@@ -384,8 +530,9 @@ class QAEngine:
             calculation=calculation
         )
 
-        # If model claimed found=True but not a single citation is verified, override
-        if found and not any_verified and len(retrieved_chunks) > 0 and config.ANTHROPIC_API_KEY:
+        # If model claimed found=True but not a single citation verified on live report, override
+        has_api_key = bool(self.get_api_key("anthropic") or self.get_api_key("gemini") or self.get_api_key("openai"))
+        if found and not any_verified and len(retrieved_chunks) > 0 and has_api_key:
             found = False
             ans_text = "Not found in the report. (The cited claims could not be verified in the source text)."
             confidence = "low"
@@ -395,12 +542,16 @@ class QAEngine:
             sid = match.group(1)
             if sid in source_map:
                 ch = source_map[sid]["chunk"]
-                return f"[p.{ch.get('label', ch.get('page'))}]"
+                lbl = ch.get("label", ch.get("page"))
+                pdf_p = ch.get("page")
+                if lbl and str(lbl) != str(pdf_p):
+                    return f"[p.{lbl} (PDF p.{pdf_p})]"
+                return f"[p.{lbl}]"
             return match.group(0)
 
         readable_answer = re.sub(r'\[(S\d+)\]', replace_cite, ans_text)
 
-        # Add source chunk details to verified citations
+        # Build full evidence structures
         full_evidence = []
         for vc in verified_citations:
             sid = vc["source_id"]

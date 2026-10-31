@@ -128,6 +128,48 @@ def evaluate(gold_path: Path, pred_path: Path) -> dict:
     }
 
 
+def run_evaluation(gold_path: Path, pred_path: Optional[Path] = None, pdf_path: Optional[Path] = None) -> dict:
+    """Run end-to-end evaluation, generating predictions if needed."""
+    if pred_path is None or not Path(pred_path).exists():
+        pred_path = Path("data/predicted_answers.jsonl")
+        pdf = pdf_path or Path("data/report_A.pdf")
+        if not pdf.exists():
+            pdfs = list(Path("data").glob("*.pdf"))
+            if pdfs:
+                pdf = pdfs[0]
+        if pdf.exists() and gold_path.exists():
+            from src.solver import DynamicReportSolver
+            solver = DynamicReportSolver(str(pdf))
+            questions = load_jsonl(gold_path)
+            answers = []
+            for q in questions:
+                res = solver.solve(qid=q.get("id", "Q00"), question=q.get("question", ""), qtype=q.get("qtype"))
+                answers.append({
+                    "id": res.qid,
+                    "answer": res.answer,
+                    "page": res.page,
+                    "confidence": round(res.confidence, 4)
+                })
+            pred_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(pred_path, "w", encoding="utf-8") as f:
+                for a in answers:
+                    f.write(json.dumps(a, ensure_ascii=False) + "\n")
+
+    res = evaluate(gold_path, pred_path)
+    print("=" * 60)
+    print(f"  P5 Report Navigator - Evaluation Results")
+    print("=" * 60)
+    print(f"  Total questions:      {res['total']}")
+    print(f"  Exact Match (EM):     {res['em_correct']}/{res['total']}  ({res['em_rate']*100:.1f}%)")
+    print(f"  Citation Accuracy:    {res['cit_correct']}/{res['total']}  ({res['cit_rate']*100:.1f}%)")
+    print(f"  ---")
+    print(f"  Combined Score:       {res['score']:.4f}")
+    print(f"  Hallucination rate:   {res['hallucination_rate']*100:.1f}%")
+    print(f"  Answerable recall:    {res['answerable_recall']*100:.1f}%")
+    print("=" * 60)
+    return res
+
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate P5 Report Navigator answers")
     parser.add_argument("--gold", default="data/questions_with_answers.jsonl",
@@ -151,7 +193,7 @@ def main():
     result = evaluate(gold_path, pred_path)
 
     print("=" * 60)
-    print(f"  P5 Report Navigator — Evaluation Results")
+    print(f"  P5 Report Navigator - Evaluation Results")
     print("=" * 60)
     print(f"  Total questions:      {result['total']}")
     print(f"  Exact Match (EM):     {result['em_correct']}/{result['total']}  ({result['em_rate']*100:.1f}%)")

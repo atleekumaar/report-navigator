@@ -8,7 +8,10 @@ from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, HTTPExcept
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-import fitz
+try:
+    import pymupdf as fitz
+except ImportError:
+    import fitz
 
 import config
 from ingest import ingest_pdf

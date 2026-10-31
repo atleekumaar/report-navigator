@@ -12,9 +12,13 @@ from pathlib import Path
 def test_smoke():
     repo_root = Path(__file__).resolve().parent.parent
     pdf_path = repo_root / "data" / "report_A.pdf"
+    if not pdf_path.exists():
+        pdfs = list((repo_root / "data").glob("*.pdf"))
+        if pdfs:
+            pdf_path = pdfs[0]
     questions_path = repo_root / "data" / "questions_with_answers.jsonl"
     
-    assert pdf_path.exists(), f"PDF report missing at {pdf_path}"
+    assert pdf_path.exists(), f"PDF report missing in {repo_root / 'data'}"
     assert questions_path.exists(), f"Questions missing at {questions_path}"
 
     with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as tmp_out:

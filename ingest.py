@@ -1,10 +1,16 @@
 import json
 import re
+import subprocess
+import shutil
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
-import fitz  # PyMuPDF
+try:
+    import pymupdf as fitz
+except ImportError:
+    import fitz
 
 import config
+
 
 def clean_text(text: str) -> str:
     """Normalize whitespace and remove non-printable characters."""
@@ -12,6 +18,7 @@ def clean_text(text: str) -> str:
     text = re.sub(r'[ \t]+', ' ', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
+
 
 def detect_page_number_label(page: fitz.Page) -> str:
     """
@@ -45,6 +52,7 @@ def detect_page_number_label(page: fitz.Page) -> str:
         return potential_labels[-1]  # Prefer footer
     return str(page.number + 1)
 
+
 def is_header_footer(b: tuple, page_rect: fitz.Rect) -> bool:
     """Check if block falls completely inside header or footer margin."""
     y0, y1 = b[1], b[3]
@@ -53,6 +61,7 @@ def is_header_footer(b: tuple, page_rect: fitz.Rect) -> bool:
     bottom_margin = h * (1.0 - config.HEADER_FOOTER_MARGIN_PERCENT)
     # Must be entirely within top margin or entirely within bottom margin
     return y1 <= top_margin or y0 >= bottom_margin
+
 
 def detect_heading(text: str) -> Optional[str]:
     """Detect if a block looks like a section or chapter heading."""
@@ -68,6 +77,7 @@ def detect_heading(text: str) -> Optional[str]:
         return " ".join(lines)
     return None
 
+
 def normalize_cell_text(cell_str: str) -> str:
     """Normalize cell text and fix PyMuPDF decimal splitting bugs (e.g. '71\\n.' -> '7.1')."""
     if not cell_str:
@@ -78,9 +88,50 @@ def normalize_cell_text(cell_str: str) -> str:
     s = re.sub(r'\s+', ' ', s).strip()
     return s.replace("|", "/")
 
+
+def ocr_page_text(page: fitz.Page, doc_path: Path) -> str:
+    """
+    OCR fallback for pages with very little extractable text.
+    Tries PyMuPDF's built-in Tesseract integration first,
+    then falls back to rendering the page as an image and calling Tesseract CLI.
+    Returns the OCR'd text or empty string on failure.
+    """
+    # Method 1: PyMuPDF built-in OCR (requires Tesseract installed)
+    try:
+        tp = page.get_textpage_ocr(flags=fitz.TEXT_PRESERVE_WHITESPACE, full=True)
+        ocr_text = page.get_text("text", textpage=tp).strip()
+        if len(ocr_text) > config.OCR_MIN_CHARS:
+            return ocr_text
+    except Exception:
+        pass  # Tesseract not available via PyMuPDF binding
+
+    # Method 2: Render page to image and call Tesseract CLI
+    if shutil.which("tesseract"):
+        try:
+            import tempfile
+            mat = fitz.Matrix(2.0, 2.0)  # 2x zoom for better OCR
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_img:
+                pix.save(tmp_img.name)
+                tmp_img_path = tmp_img.name
+
+            result = subprocess.run(
+                ["tesseract", tmp_img_path, "stdout", "-l", "eng", "--psm", "6"],
+                capture_output=True, text=True, timeout=30
+            )
+            Path(tmp_img_path).unlink(missing_ok=True)
+            ocr_text = result.stdout.strip()
+            if len(ocr_text) > config.OCR_MIN_CHARS:
+                return ocr_text
+        except Exception as e:
+            print(f"[Ingest] OCR CLI fallback failed: {e}")
+
+    return ""
+
+
 def process_table(
     page: fitz.Page,
-    tab: fitz.table.Table,
+    tab,
     table_index: int,
     current_section: str,
     page_label: str,
@@ -101,12 +152,17 @@ def process_table(
         # If block is above the table within 70 points
         if 0 < (t_rect.y0 - b_rect.y1) < 70:
             candidate = b[4].strip()
-            if re.match(r'^(Table|Statement|Chart|Box)\b', candidate, re.IGNORECASE) or len(candidate) < 120:
+            if re.match(r'^(Table|Statement|Chart|Box|Exhibit|Annexure)\b', candidate, re.IGNORECASE) or len(candidate) < 120:
                 caption = candidate.replace('\n', ' ')
                 break
 
     # Extract raw cell grid
-    raw_cells = tab.extract()
+    try:
+        raw_cells = tab.extract()
+    except Exception as e:
+        print(f"[Ingest] Table extraction failed on page {page.number + 1}, table {table_index}: {e}")
+        return [], t_rect
+
     if not raw_cells or len(raw_cells) < 1:
         return [], t_rect
 
@@ -122,11 +178,19 @@ def process_table(
             break
 
     num_cols = len(raw_cells[0])
+    # Guard against jagged rows
+    for row in raw_cells:
+        if len(row) > num_cols:
+            num_cols = len(row)
+
     combined_headers = []
     for c_idx in range(num_cols):
         col_parts = []
         for r_idx in range(header_rows_count):
-            val = str(raw_cells[r_idx][c_idx] or '').strip()
+            if c_idx < len(raw_cells[r_idx]):
+                val = str(raw_cells[r_idx][c_idx] or '').strip()
+            else:
+                val = ''
             if val and (not col_parts or col_parts[-1] != val):
                 col_parts.append(val)
         hdr_text = " - ".join(col_parts).strip() or f"Col_{c_idx+1}"
@@ -157,12 +221,21 @@ def process_table(
 
         for row in subset_rows:
             formatted_cells = []
-            for c in row:
-                cell_str = normalize_cell_text(str(c or ''))
+            for c_idx in range(num_cols):
+                if c_idx < len(row):
+                    cell_str = normalize_cell_text(str(row[c_idx] or ''))
+                else:
+                    cell_str = ''
                 formatted_cells.append(cell_str)
             md_lines.append("| " + " | ".join(formatted_cells) + " |")
 
         table_md = "\n".join(md_lines)
+
+        # Skip empty tables (only header, no real data)
+        non_empty_cells = sum(1 for row in subset_rows for c in row if str(c or '').strip())
+        if non_empty_cells == 0 and part_idx > 0:
+            continue
+
         chunk_dict = {
             "id": f"p{page.number + 1:04d}-t{table_index:02d}-part{part_idx}",
             "doc": doc_name,
@@ -180,9 +253,16 @@ def process_table(
 
     return chunks, t_rect
 
+
 def ingest_pdf(pdf_path: Path, output_file: Path = config.CHUNKS_FILE) -> List[Dict[str, Any]]:
     """
     Ingest a PDF file into clean structured chunks adhering strictly to the chunk schema.
+    Handles:
+      - Text extraction with sentence-level chunking
+      - Table extraction with configurable strategy (lines / text)
+      - OCR fallback for scanned / image pages
+      - Printed page label detection
+      - Section heading tracking
     """
     if not pdf_path.exists():
         raise FileNotFoundError(f"PDF file not found at: {pdf_path}")
@@ -191,14 +271,57 @@ def ingest_pdf(pdf_path: Path, output_file: Path = config.CHUNKS_FILE) -> List[D
     doc_name = pdf_path.name
     all_chunks: List[Dict[str, Any]] = []
     current_section = "General / Introduction"
+    table_strategy = config.TABLE_STRATEGY
 
-    print(f"[Ingest] Ingesting {doc_name} ({len(doc)} pages)...")
+    stats = {
+        "total_pages": len(doc),
+        "text_chunks": 0,
+        "table_chunks": 0,
+        "ocr_pages": 0,
+        "empty_pages": 0,
+        "tables_found": 0,
+    }
+
+    print(f"[Ingest] Ingesting {doc_name} ({len(doc)} pages, table_strategy={table_strategy})...")
 
     for page_idx in range(len(doc)):
         page = doc[page_idx]
         page_num = page_idx + 1
         page_label = detect_page_number_label(page)
         page_rect = page.rect
+
+        raw_text = page.get_text("text").strip()
+
+        # OCR fallback for pages with very little text (scanned / image pages)
+        used_ocr = False
+        if config.OCR_ENABLED and len(raw_text) < config.OCR_MIN_CHARS:
+            ocr_text = ocr_page_text(page, pdf_path)
+            if ocr_text:
+                used_ocr = True
+                stats["ocr_pages"] += 1
+                print(f"[Ingest] Page {page_num}: OCR extracted {len(ocr_text)} chars")
+                # For OCR pages, create a single text chunk (no table detection)
+                chunk_text = clean_text(ocr_text)
+                if chunk_text and len(chunk_text) >= config.MIN_CHUNK_CHARS:
+                    all_chunks.append({
+                        "id": f"p{page_num:04d}-ocr001",
+                        "doc": doc_name,
+                        "page": page_num,
+                        "label": page_label,
+                        "type": "text",
+                        "section": current_section,
+                        "text": chunk_text,
+                        "rects": [[page_rect.x0, page_rect.y0, page_rect.x1, page_rect.y1]],
+                        "table_id": None,
+                        "part": None,
+                        "ocr": True
+                    })
+                    stats["text_chunks"] += 1
+                continue  # Skip normal processing for OCR pages
+
+        if len(raw_text) < 5 and not used_ocr:
+            stats["empty_pages"] += 1
+            continue
 
         raw_blocks = page.get_text("blocks", sort=True)
 
@@ -215,8 +338,13 @@ def ingest_pdf(pdf_path: Path, output_file: Path = config.CHUNKS_FILE) -> List[D
         table_rects: List[fitz.Rect] = []
 
         try:
-            tabs = page.find_tables()
+            strategy_kwarg = {}
+            if table_strategy == "text":
+                strategy_kwarg = {"strategy": "text"}
+
+            tabs = page.find_tables(**strategy_kwarg)
             if tabs and tabs.tables:
+                stats["tables_found"] += len(tabs.tables)
                 for t_idx, tab in enumerate(tabs.tables):
                     t_chunks, t_bbox = process_table(
                         page=page,
@@ -231,6 +359,27 @@ def ingest_pdf(pdf_path: Path, output_file: Path = config.CHUNKS_FILE) -> List[D
                     table_rects.append(t_bbox)
         except Exception as e:
             print(f"[Ingest] Table extraction warning on page {page_num}: {e}")
+            # If strategy="lines" fails, try "text" as automatic fallback
+            if table_strategy != "text":
+                try:
+                    tabs = page.find_tables(strategy="text")
+                    if tabs and tabs.tables:
+                        stats["tables_found"] += len(tabs.tables)
+                        print(f"[Ingest] Page {page_num}: fallback to strategy='text' found {len(tabs.tables)} tables")
+                        for t_idx, tab in enumerate(tabs.tables):
+                            t_chunks, t_bbox = process_table(
+                                page=page,
+                                tab=tab,
+                                table_index=t_idx,
+                                current_section=current_section,
+                                page_label=page_label,
+                                doc_name=doc_name,
+                                preceding_text_blocks=raw_blocks
+                            )
+                            table_chunks.extend(t_chunks)
+                            table_rects.append(t_bbox)
+                except Exception as e2:
+                    print(f"[Ingest] Table fallback also failed on page {page_num}: {e2}")
 
         # 2. Extract and chunk text blocks (excluding table areas and headers/footers)
         blocks = raw_blocks
@@ -289,6 +438,7 @@ def ingest_pdf(pdf_path: Path, output_file: Path = config.CHUNKS_FILE) -> List[D
                             "table_id": None,
                             "part": None
                         })
+                        stats["text_chunks"] += 1
                     text_accumulator = [sentence]
                     rect_accumulator = [[b_rect.x0, b_rect.y0, b_rect.x1, b_rect.y1]]
                     current_char_count = len(sentence)
@@ -314,9 +464,11 @@ def ingest_pdf(pdf_path: Path, output_file: Path = config.CHUNKS_FILE) -> List[D
                     "table_id": None,
                     "part": None
                 })
+                stats["text_chunks"] += 1
 
         # Append table chunks for this page
         all_chunks.extend(table_chunks)
+        stats["table_chunks"] += len(table_chunks)
 
     # Write output to jsonl
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -324,8 +476,23 @@ def ingest_pdf(pdf_path: Path, output_file: Path = config.CHUNKS_FILE) -> List[D
         for chunk in all_chunks:
             f.write(json.dumps(chunk, ensure_ascii=False) + "\n")
 
-    print(f"[Ingest] Successfully ingested {len(all_chunks)} chunks into {output_file}")
+    doc.close()
+
+    print(f"\n[Ingest] ==================== INGESTION REPORT ====================")
+    print(f"  Document     : {doc_name}")
+    print(f"  Total pages  : {stats['total_pages']}")
+    print(f"  Empty pages  : {stats['empty_pages']}")
+    print(f"  OCR pages    : {stats['ocr_pages']}")
+    print(f"  Tables found : {stats['tables_found']}")
+    print(f"  Text chunks  : {stats['text_chunks']}")
+    print(f"  Table chunks : {stats['table_chunks']}")
+    print(f"  TOTAL chunks : {len(all_chunks)}")
+    print(f"  Output file  : {output_file}")
+    print(f"  Strategy     : table_strategy={config.TABLE_STRATEGY}")
+    print(f"[Ingest] =============================================================\n")
+
     return all_chunks
+
 
 if __name__ == "__main__":
     import sys

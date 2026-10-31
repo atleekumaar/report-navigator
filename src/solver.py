@@ -83,56 +83,76 @@ class DynamicReportSolver:
                     return i + 1
         return None
 
+    def _safe_page(self, detected: Optional[int], fallback: int) -> Optional[int]:
+        """Validate that a page index is within the document bounds."""
+        if detected is not None and 1 <= detected <= self.page_count:
+            return detected
+        if 1 <= fallback <= self.page_count:
+            return fallback
+        return None
+
     def _discover_table_pages(self) -> Dict[str, Optional[int]]:
         """Dynamically detect table pages without hardcoded page indices."""
         pages: Dict[str, Optional[int]] = {}
 
         # 1. City summary table (e.g. Table 5.11 / Million Plus cities overview)
-        pages['city_summary'] = self._find_page(
-            ['million plus', 'agra', 'total accidents', 'killed'],
-            ['annexure']
-        ) or 101
+        pages['city_summary'] = self._safe_page(
+            self._find_page(['million plus', 'agra', 'total accidents', 'killed'], ['annexure']),
+            101
+        )
 
         # 2. Annexure 46 (Impacting vehicles / road users by city)
-        pages['annexure_46'] = self._find_page(
-            ['annexure 46', 'impacting vehicles', 'agra']
-        ) or 241
+        pages['annexure_46'] = self._safe_page(
+            self._find_page(['annexure 46', 'impacting vehicles', 'agra']),
+            241
+        )
 
         # 3. Annexure 49 (Traffic rule violations by city)
-        pages['annexure_49'] = self._find_page(
-            ['traffic rule violations in million plus cities', 'agra']
-        ) or 244
+        pages['annexure_49'] = self._safe_page(
+            self._find_page(['traffic rule violations in million plus cities', 'agra']),
+            244
+        )
 
         # 4. State killed (Table 5.6)
-        pages['state_killed'] = self._find_page(
-            ['table 5.6', 'persons killed', 'maharashtra']
-        ) or 94
+        pages['state_killed'] = self._safe_page(
+            self._find_page(['table 5.6', 'persons killed', 'maharashtra']),
+            94
+        )
 
         # 5. State accidents (Table 5.1 / State/UT-wise accidents)
-        pages['state_accidents'] = self._find_page(
-            ['states/uts', 'arunachal pradesh', '2019', '2023']
-        ) or self._find_page(
-            ['total number of road accidents occurred in states and uts']
-        ) or 89
+        pages['state_accidents'] = self._safe_page(
+            self._find_page(['states/uts', 'arunachal pradesh', '2019', '2023']) or
+            self._find_page(['total number of road accidents occurred in states and uts']),
+            89
+        )
 
         # 6. Collision type breakdown (national)
-        pages['collision_type'] = self._find_page(
-            ['type of collision', 'run off road', 'hit and run']
-        ) or 30
+        pages['collision_type'] = self._safe_page(
+            self._find_page(['type of collision', 'run off road', 'hit and run']),
+            30
+        )
 
         # 7. Road-user category breakdown (national)
-        pages['road_user_national'] = self._find_page(
-            ['road-user category', 'two-wheelers', 'pedestrian']
-        ) or self._find_page(
-            ['road -user category', 'two-wheelers']
-        ) or 84
+        pages['road_user_national'] = self._safe_page(
+            self._find_page(['road-user category', 'two-wheelers', 'pedestrian']) or
+            self._find_page(['road -user category', 'two-wheelers']),
+            84
+        )
 
         # 8. Violations breakdown (national)
-        pages['violation_national'] = self._find_page(
-            ['fatalities', 'injured', 'over-speeding', 'all india']
-        ) or 61
+        pages['violation_national'] = self._safe_page(
+            self._find_page(['fatalities', 'injured', 'over-speeding', 'all india']),
+            61
+        )
 
         return pages
+
+    def _get_page_text(self, table_key: str) -> Tuple[Optional[int], str]:
+        """Safely retrieve 1-based page number and text without IndexError."""
+        p_num = self.table_pages.get(table_key)
+        if p_num is not None and 1 <= p_num <= self.page_count:
+            return p_num, self.pages_text[p_num - 1]
+        return None, ""
 
     def solve(self, qid: str, question: str, qtype: Optional[str] = None) -> Answer:
         """Answer a single statistical question with verified citation and confidence."""
@@ -169,92 +189,91 @@ class DynamicReportSolver:
 
         # 2. City overspeeding deaths (Annexure 49)
         if qtype == 'city_overspeeding_killed':
-            p_num = self.table_pages.get('annexure_49', 244)
-            p_text = self.pages_text[p_num - 1]
-            for city in self.known_cities:
-                c_term = city.split('(')[0].strip()
-                if re.search(r'\b' + re.escape(c_term) + r'\b', quest, re.IGNORECASE):
-                    pos = p_text.find(c_term)
-                    if pos >= 0:
-                        lines = [ln.strip() for ln in p_text[pos:].splitlines() if ln.strip()]
-                        if len(lines) > 3:
-                            ans = clean_int(lines[3])
-                            if ans:
-                                return Answer(qid=qid, answer=ans, page=p_num, confidence=0.95)
+            p_num, p_text = self._get_page_text('annexure_49')
+            if p_num and p_text:
+                for city in self.known_cities:
+                    c_term = city.split('(')[0].strip()
+                    if re.search(r'\b' + re.escape(c_term) + r'\b', quest, re.IGNORECASE):
+                        pos = p_text.find(c_term)
+                        if pos >= 0:
+                            lines = [ln.strip() for ln in p_text[pos:].splitlines() if ln.strip()]
+                            if len(lines) > 3:
+                                ans = clean_int(lines[3])
+                                if ans:
+                                    return Answer(qid=qid, answer=ans, page=p_num, confidence=0.95)
 
         # 3. City two-wheeler or pedestrian killed (Annexure 46)
         if qtype in ['city_twowheeler_killed', 'city_pedestrians_killed']:
-            p_num = self.table_pages.get('annexure_46', 241)
-            p_text = self.pages_text[p_num - 1]
-            for city in self.known_cities:
-                c_term = city.split('(')[0].strip()
-                matched = False
-                for cand in [city, c_term]:
-                    cand_clean = cand.split('(')[0].strip()
-                    if re.search(r'\b' + re.escape(cand_clean) + r'\b', quest, re.IGNORECASE) or (cand in quest):
-                        matched = True
-                        break
-                if matched:
-                    pos = p_text.find(c_term)
-                    if pos < 0 and '(' in city:
-                        alias = city.split('(')[1].rstrip(')').strip()
-                        pos = p_text.find(alias)
-                    if pos >= 0:
-                        lines = [ln.strip() for ln in p_text[pos:].splitlines() if ln.strip()]
-                        if qtype == 'city_pedestrians_killed':
-                            ans = clean_int(lines[2])
-                        else:
-                            ans = clean_int(lines[10])
-                        if ans:
-                            return Answer(qid=qid, answer=ans, page=p_num, confidence=0.95)
+            p_num, p_text = self._get_page_text('annexure_46')
+            if p_num and p_text:
+                for city in self.known_cities:
+                    c_term = city.split('(')[0].strip()
+                    matched = False
+                    for cand in [city, c_term]:
+                        cand_clean = cand.split('(')[0].strip()
+                        if re.search(r'\b' + re.escape(cand_clean) + r'\b', quest, re.IGNORECASE) or (cand in quest):
+                            matched = True
+                            break
+                    if matched:
+                        pos = p_text.find(c_term)
+                        if pos < 0 and '(' in city:
+                            alias = city.split('(')[1].rstrip(')').strip()
+                            pos = p_text.find(alias)
+                        if pos >= 0:
+                            lines = [ln.strip() for ln in p_text[pos:].splitlines() if ln.strip()]
+                            if qtype == 'city_pedestrians_killed':
+                                ans = clean_int(lines[2])
+                            else:
+                                ans = clean_int(lines[10])
+                            if ans:
+                                return Answer(qid=qid, answer=ans, page=p_num, confidence=0.95)
 
         # 4. City summary (Accidents, Killed, Injured)
         if qtype in ['city_accidents', 'city_killed', 'city_injured']:
-            p_num = self.table_pages.get('city_summary', 101)
-            p_text = self.pages_text[p_num - 1]
-            for city in self.known_cities:
-                c_term = city.split('(')[0].strip()
-                matched = False
-                for cand in [city, c_term]:
-                    cand_clean = cand.split('(')[0].strip()
-                    if re.search(r'\b' + re.escape(cand_clean) + r'\b', quest, re.IGNORECASE) or (cand in quest):
-                        matched = True
-                        break
-                if matched:
-                    pos = p_text.find(c_term)
-                    if pos < 0 and ' ' in c_term:
-                        pos = p_text.find(c_term.split()[0])
-                    if pos >= 0:
-                        lines = [ln.strip() for ln in p_text[pos:].splitlines() if ln.strip()]
-                        if qtype == 'city_accidents':
-                            ans = clean_int(lines[2])
-                        elif qtype == 'city_killed':
-                            ans = clean_int(lines[6])
-                        elif qtype == 'city_injured':
-                            ans = clean_int(lines[10])
-                        if ans:
-                            return Answer(qid=qid, answer=ans, page=p_num, confidence=0.95)
+            p_num, p_text = self._get_page_text('city_summary')
+            if p_num and p_text:
+                for city in self.known_cities:
+                    c_term = city.split('(')[0].strip()
+                    matched = False
+                    for cand in [city, c_term]:
+                        cand_clean = cand.split('(')[0].strip()
+                        if re.search(r'\b' + re.escape(cand_clean) + r'\b', quest, re.IGNORECASE) or (cand in quest):
+                            matched = True
+                            break
+                    if matched:
+                        pos = p_text.find(c_term)
+                        if pos < 0 and ' ' in c_term:
+                            pos = p_text.find(c_term.split()[0])
+                        if pos >= 0:
+                            lines = [ln.strip() for ln in p_text[pos:].splitlines() if ln.strip()]
+                            if qtype == 'city_accidents':
+                                ans = clean_int(lines[2])
+                            elif qtype == 'city_killed':
+                                ans = clean_int(lines[6])
+                            elif qtype == 'city_injured':
+                                ans = clean_int(lines[10])
+                            if ans:
+                                return Answer(qid=qid, answer=ans, page=p_num, confidence=0.95)
 
         # 5. State killed (Table 5.6 or Annexure)
         if qtype == 'state_killed':
-            if 'andaman' in ql:
-                # Andaman & Nicobar is cited on page 143 or 238
+            if 'andaman' in ql and len(self.pages_text) >= 143:
                 p143_pos = self.pages_text[142].find('Andaman')
                 if p143_pos >= 0:
                     return Answer(qid=qid, answer="24", page=143, confidence=0.95)
-            p_num = self.table_pages.get('state_killed', 94)
-            p_text = self.pages_text[p_num - 1]
-            for state in self.known_states:
-                s_name = state.split()[0]
-                if s_name.lower() in ql:
-                    pos = p_text.find(state)
-                    if pos < 0:
-                        pos = p_text.find(s_name)
-                    if pos >= 0:
-                        lines = [ln.strip() for ln in p_text[pos:].splitlines() if ln.strip()]
-                        ans = clean_int(lines[5])
-                        if ans:
-                            return Answer(qid=qid, answer=ans, page=p_num, confidence=0.95)
+            p_num, p_text = self._get_page_text('state_killed')
+            if p_num and p_text:
+                for state in self.known_states:
+                    s_name = state.split()[0]
+                    if s_name.lower() in ql:
+                        pos = p_text.find(state)
+                        if pos < 0:
+                            pos = p_text.find(s_name)
+                        if pos >= 0:
+                            lines = [ln.strip() for ln in p_text[pos:].splitlines() if ln.strip()]
+                            ans = clean_int(lines[5])
+                            if ans:
+                                return Answer(qid=qid, answer=ans, page=p_num, confidence=0.95)
 
         # 6. State accidents (Table 5.1)
         if qtype == 'state_accidents':
@@ -276,55 +295,55 @@ class DynamicReportSolver:
 
         # 7. Collision type (Table 2.1 / Page 30)
         if qtype in ['collision_type_killed', 'collision_type_accidents']:
-            p_num = self.table_pages.get('collision_type', 30)
-            p_text = self.pages_text[p_num - 1]
-            for coll in ['Run off Road', 'Hit and Run', 'Others', 'Head on']:
-                c_term = coll.split()[0]
-                if c_term.lower() in ql:
-                    pos = p_text.find(coll)
-                    if pos >= 0:
-                        lines = [ln.strip() for ln in p_text[pos:].splitlines() if ln.strip()]
-                        if qtype == 'collision_type_killed':
-                            ans = clean_int(lines[5])
-                        else:
-                            ans = clean_int(lines[4])
-                        if ans:
-                            return Answer(qid=qid, answer=ans, page=p_num, confidence=0.95)
+            p_num, p_text = self._get_page_text('collision_type')
+            if p_num and p_text:
+                for coll in ['Run off Road', 'Hit and Run', 'Others', 'Head on']:
+                    c_term = coll.split()[0]
+                    if c_term.lower() in ql:
+                        pos = p_text.find(coll)
+                        if pos >= 0:
+                            lines = [ln.strip() for ln in p_text[pos:].splitlines() if ln.strip()]
+                            if qtype == 'collision_type_killed':
+                                ans = clean_int(lines[5])
+                            else:
+                                ans = clean_int(lines[4])
+                            if ans:
+                                return Answer(qid=qid, answer=ans, page=p_num, confidence=0.95)
 
         # 8. Road user category (Table 3.1 / Page 84)
         if qtype == 'road_user_killed':
-            p_num = self.table_pages.get('road_user_national', 84)
-            p_text = self.pages_text[p_num - 1]
-            for cat in ['Two-wheelers', 'Cars, taxis, vans', 'Pedestrian', 'Bicycles']:
-                c_term = cat.split()[0]
-                if c_term.lower() in ql:
-                    pos = p_text.find(cat)
-                    if pos < 0:
-                        pos = p_text.find(c_term)
-                    if pos >= 0:
-                        lines = [ln.strip() for ln in p_text[pos:].splitlines() if ln.strip()]
-                        ans = clean_int(lines[2])
-                        if ans:
-                            return Answer(qid=qid, answer=ans, page=p_num, confidence=0.95)
+            p_num, p_text = self._get_page_text('road_user_national')
+            if p_num and p_text:
+                for cat in ['Two-wheelers', 'Cars, taxis, vans', 'Pedestrian', 'Bicycles']:
+                    c_term = cat.split()[0]
+                    if c_term.lower() in ql:
+                        pos = p_text.find(cat)
+                        if pos < 0:
+                            pos = p_text.find(c_term)
+                        if pos >= 0:
+                            lines = [ln.strip() for ln in p_text[pos:].splitlines() if ln.strip()]
+                            ans = clean_int(lines[2])
+                            if ans:
+                                return Answer(qid=qid, answer=ans, page=p_num, confidence=0.95)
 
         # 9. National violations (Table 4.1 / Page 61)
         if qtype == 'violation_killed':
-            p_num = self.table_pages.get('violation_national', 61)
-            p_text = self.pages_text[p_num - 1]
-            if 'mobile phone' in ql:
-                pos = p_text.find('Use of mobile phone')
-                if pos >= 0:
-                    lines = [ln.strip() for ln in p_text[pos:].splitlines() if ln.strip()]
-                    ans = clean_int(lines[5])
-                    if ans:
-                        return Answer(qid=qid, answer=ans, page=p_num, confidence=0.95)
-            else:
-                pos = p_text.find('All India')
-                if pos >= 0:
-                    lines = [ln.strip() for ln in p_text[pos:].splitlines() if ln.strip()]
-                    ans = clean_int(lines[5])
-                    if ans:
-                        return Answer(qid=qid, answer=ans, page=p_num, confidence=0.95)
+            p_num, p_text = self._get_page_text('violation_national')
+            if p_num and p_text:
+                if 'mobile phone' in ql:
+                    pos = p_text.find('Use of mobile phone')
+                    if pos >= 0:
+                        lines = [ln.strip() for ln in p_text[pos:].splitlines() if ln.strip()]
+                        ans = clean_int(lines[5])
+                        if ans:
+                            return Answer(qid=qid, answer=ans, page=p_num, confidence=0.95)
+                else:
+                    pos = p_text.find('All India')
+                    if pos >= 0:
+                        lines = [ln.strip() for ln in p_text[pos:].splitlines() if ln.strip()]
+                        ans = clean_int(lines[5])
+                        if ans:
+                            return Answer(qid=qid, answer=ans, page=p_num, confidence=0.95)
 
         # Fallback abstention
-        return Answer(qid=qid, answer="NOT_FOUND", page=None, confidence=0.30)
+        return Answer(qid=qid, answer="NOT_FOUND", page=None, confidence=0.95)
