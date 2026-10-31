@@ -25,11 +25,13 @@ wheels/
 
 # Index store cache / artifacts
 index_store/*.npy
-index_store/*.pkl
-index_store/chunks.jsonl
+!index_store/chunks.jsonl
+!index_store/bm25.pkl
+!index_store/metadata.json
 !index_store/.gitkeep
 data/*.pdf
 !data/report.pdf
+!data/report_A.pdf
 !data/.gitkeep
 data/predicted_answers.jsonl
 data/feedback.jsonl

@@ -132,18 +132,29 @@ _index_status: Dict[str, Any] = {
 
 
 def get_active_pdf() -> Path:
-    """Retrieve the currently active PDF path, respecting active_doc.json if present."""
+    """Retrieve the currently active PDF path, respecting active_doc.json if present across OSes."""
     state_file = config.DATA_DIR / "active_doc.json"
     if state_file.exists():
         try:
             with open(state_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                filename = data.get("filename")
+                if filename:
+                    candidate = config.DATA_DIR / filename
+                    if candidate.exists():
+                        config.PDF_PATH = candidate
+                        return candidate
                 candidate = Path(data.get("active_pdf", ""))
                 if candidate.exists():
                     config.PDF_PATH = candidate
                     return candidate
         except Exception:
             pass
+    for fname in ["report_A.pdf", "report.pdf"]:
+        candidate = config.DATA_DIR / fname
+        if candidate.exists():
+            config.PDF_PATH = candidate
+            return candidate
     return config.PDF_PATH
 
 
@@ -824,6 +835,20 @@ async def upload_and_index(
 def get_indexing_status():
     """Returns the current status, progress percentage, and message of the document indexing pipeline."""
     return _index_status
+
+
+
+@app.on_event("startup")
+def startup_event():
+    """Ensure active document index is loaded and ready on boot."""
+    active_pdf = get_active_pdf()
+    if not config.CHUNKS_FILE.exists() or config.CHUNKS_FILE.stat().st_size < 100:
+        if active_pdf.exists():
+            print(f"[Startup] Building missing index for {active_pdf.name}...")
+            try:
+                run_indexing_task(active_pdf)
+            except Exception as e:
+                print(f"[Startup] Index build error: {e}")
 
 
 if __name__ == "__main__":
