@@ -65,14 +65,15 @@ def detect_heading(text: str) -> Optional[str]:
         return " ".join(lines)
     return None
 
-def extract_cell_text_from_words(page: fitz.Page, cell_rect: fitz.Rect) -> str:
-    """Extract and sort words within a cell bounding box to preserve decimals and order."""
-    words = page.get_text("words", clip=cell_rect)
-    if not words:
+def normalize_cell_text(cell_str: str) -> str:
+    """Normalize cell text and fix PyMuPDF decimal splitting bugs (e.g. '71\\n.' -> '7.1')."""
+    if not cell_str:
         return ""
-    # word: (x0, y0, x1, y1, word_str, block_no, line_no, word_no)
-    words_sorted = sorted(words, key=lambda w: (w[1], w[0]))
-    return " ".join(w[4] for w in words_sorted).strip()
+    # Fix digits separated by newline and decimal dot: '71\n.' or '7\n.1' or '99\n.' -> reconstruct decimal
+    s = cell_str.replace('\r', '').strip()
+    s = re.sub(r'(\d+)\s*\n\s*\.\s*(\d*)', lambda m: f"{m.group(1)[:-1]}.{m.group(1)[-1]}{m.group(2)}" if len(m.group(1)) > 1 and not m.group(2) else f"{m.group(1)}.{m.group(2)}", s)
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s.replace("|", "/")
 
 def process_table(
     page: fitz.Page,
@@ -154,7 +155,7 @@ def process_table(
         for row in subset_rows:
             formatted_cells = []
             for c in row:
-                cell_str = str(c or '').strip().replace("|", "/")
+                cell_str = normalize_cell_text(str(c or ''))
                 formatted_cells.append(cell_str)
             md_lines.append("| " + " | ".join(formatted_cells) + " |")
 
