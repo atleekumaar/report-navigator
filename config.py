@@ -59,11 +59,14 @@ USE_RERANK = os.getenv("USE_RERANK", "1").lower() in ("1", "true", "yes")
 USE_REWRITE = os.getenv("USE_REWRITE", "1").lower() in ("1", "true", "yes")
 
 # LLM Providers & Keys
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").lower()
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq" if os.getenv("GROQ_API_KEY") else "anthropic").lower()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
+GROQ_MODEL_ANSWER = os.getenv("GROQ_MODEL_ANSWER", "openai/gpt-oss-20b")
+GROQ_MODEL_REWRITE = os.getenv("GROQ_MODEL_REWRITE", "openai/gpt-oss-20b")
 LLM_MODEL_ANSWER = os.getenv("LLM_MODEL_ANSWER", "claude-3-5-sonnet-20241022")
 LLM_MODEL_REWRITE = os.getenv("LLM_MODEL_REWRITE", "claude-3-5-haiku-20241022")
 

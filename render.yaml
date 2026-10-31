@@ -20,6 +20,10 @@ services:
         value: "*"
       - key: DATABASE_URL
         sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: LLM_PROVIDER
+        value: "groq"
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: GEMINI_API_KEY

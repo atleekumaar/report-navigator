@@ -170,7 +170,9 @@ class QAEngine:
 
     def get_api_key(self, provider: str) -> str:
         """Helper to get API key from config or environment with fallback alias."""
-        if provider == "gemini":
+        if provider == "groq":
+            return config.GROQ_API_KEY or os.getenv("GROQ_API_KEY", "")
+        elif provider == "gemini":
             return config.GEMINI_API_KEY or os.getenv("GOOGLE_API_KEY", "") or os.getenv("GEMINI_API_KEY", "")
         elif provider == "openai":
             return config.OPENAI_API_KEY or os.getenv("OPENAI_API_KEY", "")
@@ -186,9 +188,37 @@ class QAEngine:
         if not config.USE_REWRITE or not history:
             return {"standalone": query, "keywords": [query]}
 
+        groq_key = self.get_api_key("groq")
         gemini_key = self.get_api_key("gemini")
         openai_key = self.get_api_key("openai")
         anthropic_key = self.get_api_key("anthropic")
+
+        # 0. Groq (ultra-fast inference, priority if key provided)
+        if (config.LLM_PROVIDER == "groq" or groq_key) and groq_key:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {groq_key}",
+                    "Content-Type": "application/json",
+                    "User-Agent": "ReportNavigator/1.0"
+                }
+                payload = {
+                    "model": getattr(config, "GROQ_MODEL_ANSWER", "llama-3.3-70b-versatile"),
+                    "messages": [
+                        {"role": "system", "content": QA_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0.0
+                }
+                res = httpx.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers, timeout=20.0)
+                if res.status_code == 200:
+                    data = res.json()
+                    content = data["choices"][0]["message"]["content"]
+                    return json.loads(content)
+                else:
+                    print(f"[QA] Groq API error {res.status_code}: {res.text}")
+            except Exception as e:
+                print(f"[QA] Groq call failed: {e}")
 
         if not (anthropic_key or openai_key or gemini_key):
             return {"standalone": query, "keywords": [query]}
@@ -280,9 +310,37 @@ class QAEngine:
         Tries configured provider, falls back across providers, and finally uses
         dynamic evidence-based extraction if no API keys are available or on network failure.
         """
+        groq_key = self.get_api_key("groq")
         gemini_key = self.get_api_key("gemini")
         openai_key = self.get_api_key("openai")
         anthropic_key = self.get_api_key("anthropic")
+
+        # 0. Groq (ultra-fast inference, priority if key provided)
+        if (config.LLM_PROVIDER == "groq" or groq_key) and groq_key:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {groq_key}",
+                    "Content-Type": "application/json",
+                    "User-Agent": "ReportNavigator/1.0"
+                }
+                payload = {
+                    "model": getattr(config, "GROQ_MODEL_ANSWER", "llama-3.3-70b-versatile"),
+                    "messages": [
+                        {"role": "system", "content": QA_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0.0
+                }
+                res = httpx.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers, timeout=20.0)
+                if res.status_code == 200:
+                    data = res.json()
+                    content = data["choices"][0]["message"]["content"]
+                    return json.loads(content)
+                else:
+                    print(f"[QA] Groq API error {res.status_code}: {res.text}")
+            except Exception as e:
+                print(f"[QA] Groq call failed: {e}")
 
         # 1. Anthropic (if chosen or key present)
         if (config.LLM_PROVIDER == "anthropic" or (not gemini_key and not openai_key)) and anthropic_key:
