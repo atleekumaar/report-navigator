@@ -1,7 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  outputFileTracing: false,
   async rewrites() {
     return [
       {
@@ -13,4 +12,5 @@ const nextConfig = {
 };
 
 export default nextConfig;
+
 
