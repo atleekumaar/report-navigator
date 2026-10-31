@@ -278,7 +278,3 @@ python eval.py --gold data/sample_questions.jsonl --pred data/predicted_answers.
 - **Codebase Licence**: Released under the MIT Licence in the Hacktoberfest spirit.
 
 ---
-
-## Team
-- **Atul Kumar** — Team Lead, Architecture Design, RAG Pipeline & Web UI Development.
-- **Report Navigator Team** — Data Analysis, Error Analysis, Benchmark Evaluation & Quality Assurance.
