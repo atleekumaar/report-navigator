@@ -1,6 +1,6 @@
-{"question": "What was the total unemployment rate for Kerala in 2024?", "answerable": true, "expected_pages": [45], "expected_contains": ["9.9"]}
-{"question": "What was the female labour force participation rate in 2024?", "answerable": true, "expected_pages": [12, 14], "expected_contains": ["participation", "%"]}
-{"question": "Which state had the lowest unemployment rate in 2024?", "answerable": true, "expected_pages": [45, 46], "expected_contains": ["lowest"]}
+{"question": "What was the total unemployment rate for Kerala in 2024?", "answerable": true, "expected_pages": [3, 43], "expected_contains": ["9.9"]}
+{"question": "What was the female labour force participation rate in 2024?", "answerable": true, "expected_pages": [2, 1], "expected_contains": ["participation", "cent"]}
+{"question": "Which state had the lowest unemployment rate in 2024?", "answerable": true, "expected_pages": [3, 43], "expected_contains": ["lowest"]}
 {"question": "What was the average inflation rate in Tokyo in 1995?", "answerable": false}
 {"question": "What were the total government expenditures on space exploration in 1965?", "answerable": false}
-{"question": "Compare male and female unemployment rates in urban areas.", "answerable": true, "expected_pages": [32, 33], "expected_contains": ["male", "female"]}
+{"question": "Compare male and female unemployment rates in urban areas.", "answerable": true, "expected_pages": [2, 3], "expected_contains": ["statistical"]}

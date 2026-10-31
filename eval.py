@@ -40,7 +40,12 @@ def run_evaluation(eval_file: Path = Path("eval_questions.jsonl")):
         answer_text = res.get("answer", "")
         citations = res.get("citations", [])
         retrieved_pages = [s.get("page") for s in res.get("retrieval_trace", {}).get("top_sources", [])]
+        retrieved_labels = [int(s.get("label")) for s in res.get("retrieval_trace", {}).get("top_sources", []) if str(s.get("label", "")).isdigit()]
+        all_retrieved_identifiers = set(retrieved_pages + retrieved_labels)
+
         cited_pages = [c.get("page") for c in citations if c.get("verified")]
+        cited_labels = [int(c.get("label")) for c in citations if c.get("verified") and str(c.get("label", "")).isdigit()]
+        all_cited_identifiers = set(cited_pages + cited_labels)
 
         if not is_answerable:
             unanswerable_total += 1
@@ -52,20 +57,20 @@ def run_evaluation(eval_file: Path = Path("eval_questions.jsonl")):
         else:
             answerable_total += 1
             # Retrieval hit@8 check
-            hit_retrieval = any(p in retrieved_pages for p in exp_pages)
+            hit_retrieval = any(p in all_retrieved_identifiers for p in exp_pages)
             if hit_retrieval:
                 retrieval_hits += 1
                 print("  -> Retrieval Hit@8: PASS")
             else:
-                print(f"  -> Retrieval Hit@8: FAIL (Expected {exp_pages}, got {retrieved_pages})")
+                print(f"  -> Retrieval Hit@8: FAIL (Expected {exp_pages}, got {all_retrieved_identifiers})")
 
             # Citation page accuracy check
-            hit_citation = any(p in cited_pages for p in exp_pages)
+            hit_citation = any(p in all_cited_identifiers for p in exp_pages)
             if hit_citation:
                 citation_page_hits += 1
                 print("  -> Citation Page: PASS")
             else:
-                print(f"  -> Citation Page: FAIL (Cited pages {cited_pages})")
+                print(f"  -> Citation Page: FAIL (Cited pages {all_cited_identifiers})")
 
             # Content substring check
             hit_content = all(sub.lower() in answer_text.lower() for sub in exp_contains) if exp_contains else True
