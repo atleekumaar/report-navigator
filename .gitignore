@@ -32,6 +32,7 @@ data/*.pdf
 !data/report.pdf
 !data/.gitkeep
 data/predicted_answers.jsonl
+data/feedback.jsonl
 
 # Environment variables
 .env

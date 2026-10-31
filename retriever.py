@@ -21,15 +21,9 @@ class HybridRetriever:
     def _init_reranker(self):
         try:
             from sentence_transformers import CrossEncoder
-            print(f"[Retriever] Loading reranker model: {config.RERANK_MODEL_NAME}...")
             self.reranker = CrossEncoder(config.RERANK_MODEL_NAME, local_files_only=True)
-        except Exception as e:
-            try:
-                from sentence_transformers import CrossEncoder
-                self.reranker = CrossEncoder(config.RERANK_MODEL_NAME)
-            except Exception as e2:
-                print(f"[Retriever] Notice: Cross-encoder unavailable ({e2}). Using fast heuristic ranking.")
-                self.reranker = None
+        except Exception:
+            self.reranker = None
 
     def detect_pinned_pages(self, query: str) -> Set[int]:
         """Detect explicit page references in the query, e.g. 'page 45', 'p. 45', 'p45'."""

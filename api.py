@@ -2,9 +2,10 @@ import asyncio
 import json
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, HTTPException, Query, Response
+from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, HTTPException, Query, Response, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -20,31 +21,102 @@ from retriever import HybridRetriever
 from qa import QAEngine
 from highlight import render_highlighted_page_png, get_normalized_page_rects
 
+# ===========================================================================
+# OpenAPI Tags & Metadata
+# ===========================================================================
+
+tags_metadata = [
+    {
+        "name": "System",
+        "description": "System health diagnostics, index inspection, and user feedback submission."
+    },
+    {
+        "name": "Document",
+        "description": "Active PDF metadata, multi-document cataloging, document selection, and raw PDF streaming."
+    },
+    {
+        "name": "Evidence & Pages",
+        "description": "High-fidelity page rendering with burned-in verbatim highlights and normalized coordinate extraction for client-side bounding boxes."
+    },
+    {
+        "name": "Question Answering",
+        "description": "Grounded question answering endpoints: direct synchronous QA (/api/query, /api/ask) and real-time streaming SSE QA (/api/chat) with full anti-hallucination citation verification."
+    },
+    {
+        "name": "Ingestion & Indexing",
+        "description": "Upload new statistical PDF reports, run table/text extraction, build BM25 + dense indexes, and monitor pipeline progress."
+    }
+]
+
 app = FastAPI(
     title="Report Navigator API",
     description=(
-        "Comprehensive Backend API for the Report Navigator RAG System.\n\n"
-        "Capabilities:\n"
-        "- Ingest and index arbitrary statistical PDF reports.\n"
-        "- Grounded question answering with anti-hallucination verification.\n"
-        "- Exact page citations and pinpoint highlighted PDF page rendering.\n"
-        "- Synchronous and streaming SSE chat endpoints.\n"
+        "## Production Grounded Statistics QA & Document Navigator API\n\n"
+        "Welcome to the **Report Navigator API**, an advanced Retrieval-Augmented Generation (RAG) platform "
+        "tailored for high-precision extraction and statistical question answering on tabular and textual PDF reports.\n\n"
+        "### Core Engineering Highlights:\n"
+        "- **Table-First Grounding**: Forward-fills merged table headers, extracts row-level contexts, and reconstructs multi-level categories.\n"
+        "- **Anti-Hallucination Citation Verification**: Every answer strictly derives from verbatim quotes and verified table cells.\n"
+        "- **Visual Evidence Highlight**: Renders pinpoint page images with highlights directly burned into cited text and tables.\n"
+        "- **Streaming SSE Chat**: Real-time pipeline events (`rewriting`, `searching`, `reading`, `verifying`) followed by final answer payload.\n"
+        "- **Cloud & Serverless Ready**: Deployable on Render / Neon Serverless Postgres / Vercel."
     ),
-    version="1.1.0",
+    version="1.2.0",
+    openapi_tags=tags_metadata,
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    swagger_ui_parameters={"docExpansion": "list", "deepLinking": True, "filter": True}
 )
 
-# Enable CORS for Next.js frontend and external clients
+# ===========================================================================
+# Security Middleware & CORS
+# ===========================================================================
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    """Enforce standard enterprise HTTP security headers."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
+# Configure CORS
+allow_all = "*" in config.CORS_ORIGINS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["*"] if allow_all else config.CORS_ORIGINS,
+    allow_credentials=False if allow_all else True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Global engine and indexing state
+# ===========================================================================
+# Rate Limiting & Global Engine State
+# ===========================================================================
+
+_request_timestamps: Dict[str, List[float]] = {}
+_rate_limit_lock = asyncio.Lock()
+
+
+async def check_rate_limit(request: Request):
+    """Sliding-window IP-based rate limiter to protect downstream LLM & compute resources."""
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    now = time.time()
+    async with _rate_limit_lock:
+        timestamps = _request_timestamps.setdefault(client_ip, [])
+        cutoff = now - 60.0
+        # Retain only timestamps from the last 60 seconds
+        _request_timestamps[client_ip] = [t for t in timestamps if t > cutoff]
+        if len(_request_timestamps[client_ip]) >= config.RATE_LIMIT_PER_MINUTE:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limit exceeded: maximum {config.RATE_LIMIT_PER_MINUTE} requests per minute."
+            )
+        _request_timestamps[client_ip].append(now)
+
+
 _qa_engine: Optional[QAEngine] = None
 _index_status: Dict[str, Any] = {
     "status": "idle",
@@ -81,6 +153,19 @@ def set_active_pdf(pdf_path: Path):
         print(f"[API] Warning persisting active doc: {e}")
 
 
+def sanitize_pdf_filename(filename: str) -> Path:
+    """Sanitize filename to prevent path traversal vulnerabilities and ensure it resolves in DATA_DIR."""
+    safe_name = Path(filename).name
+    if not safe_name.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Invalid filename: only .pdf files are accepted.")
+    target_path = (config.DATA_DIR / safe_name).resolve()
+    try:
+        target_path.relative_to(config.DATA_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Path traversal attempt rejected.")
+    return target_path
+
+
 def get_qa_engine() -> QAEngine:
     """Lazy-initializes or returns the cached QAEngine with loaded BM25/dense retriever."""
     global _qa_engine
@@ -103,28 +188,58 @@ def reset_qa_engine():
     _qa_engine = None
 
 
+# ===========================================================================
+# Pydantic Schemas
+# ===========================================================================
+
 class ChatMessage(BaseModel):
-    role: str = Field(..., description="Role: 'user' or 'assistant'")
-    content: str = Field(..., description="Message text")
+    role: str = Field(..., max_length=50, description="Message sender role: 'user' or 'assistant'")
+    content: str = Field(..., max_length=4000, description="Message text content")
 
 
 class ChatRequest(BaseModel):
-    query: str = Field(..., description="The user query or question about the report", json_schema_extra={"example": "What was the number of road accident deaths in Pune city in 2023?"})
-    history: Optional[List[ChatMessage]] = Field(default=[], description="Prior conversation messages")
-    use_rerank: Optional[bool] = Field(default=True, description="Enable cross-encoder / heuristic reranking")
+    query: str = Field(
+        ...,
+        min_length=1,
+        max_length=config.MAX_QUERY_LENGTH,
+        description="The statistical or factual question about the report",
+        json_schema_extra={"example": "What was the number of road accident deaths in Pune city in 2023?"}
+    )
+    history: Optional[List[ChatMessage]] = Field(
+        default=[],
+        max_length=config.MAX_HISTORY_MESSAGES,
+        description="Prior conversation history for context-aware rewriting"
+    )
+    use_rerank: Optional[bool] = Field(
+        default=True,
+        description="Enable cross-encoder or heuristic reranking"
+    )
 
 
 class DocumentSelectRequest(BaseModel):
-    filename: str = Field(..., description="The filename of an existing PDF in the data directory to set active", json_schema_extra={"example": "report_A.pdf"})
+    filename: str = Field(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="The filename of an existing PDF in the data directory to set active",
+        json_schema_extra={"example": "report_A.pdf"}
+    )
 
 
-# ---------------------------------------------------------------------------
+class FeedbackRequest(BaseModel):
+    query: str = Field(..., max_length=1000, description="The user question that was answered")
+    answer: str = Field(..., max_length=4000, description="The answer that was provided")
+    rating: str = Field(..., description="User rating: 'positive' or 'negative'")
+    comment: Optional[str] = Field(None, max_length=1000, description="Optional user commentary")
+
+
+# ===========================================================================
 # System Endpoints
-# ---------------------------------------------------------------------------
+# ===========================================================================
 
-@app.get("/api/health", tags=["System"])
+@app.get("/api/health", tags=["System"], summary="Health check and status diagnostics")
 def health_check():
-    """Health check endpoint indicating server status and active PDF availability."""
+    """Health check endpoint indicating server status, active document, page count, and indexed chunk count."""
     active_pdf = get_active_pdf()
     exists = active_pdf.exists()
     page_count = 0
@@ -153,11 +268,30 @@ def health_check():
     }
 
 
-# ---------------------------------------------------------------------------
-# Document Management Endpoints
-# ---------------------------------------------------------------------------
+@app.post("/api/feedback", tags=["System"], summary="Submit user feedback on answer quality")
+def submit_feedback(req: FeedbackRequest):
+    """Persists user thumbs up / down feedback and optional comments for continuous QA evaluation."""
+    feedback_file = config.DATA_DIR / "feedback.jsonl"
+    record = {
+        "timestamp": time.time(),
+        "query": req.query,
+        "answer": req.answer,
+        "rating": req.rating,
+        "comment": req.comment
+    }
+    try:
+        with open(feedback_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception as e:
+        print(f"[API] Error saving feedback: {e}")
+    return {"status": "success", "message": "Feedback recorded successfully."}
 
-@app.get("/api/doc", tags=["Document"])
+
+# ===========================================================================
+# Document Management Endpoints
+# ===========================================================================
+
+@app.get("/api/doc", tags=["Document"], summary="Active report metadata and starter questions")
 def get_document_metadata():
     """
     Returns metadata about the active report:
@@ -239,7 +373,7 @@ def get_document_metadata():
     }
 
 
-@app.get("/api/documents", tags=["Document"])
+@app.get("/api/documents", tags=["Document"], summary="List available PDF documents")
 def list_documents():
     """List all PDF files available in the data directory and indicate which is active."""
     active_pdf = get_active_pdf()
@@ -263,10 +397,10 @@ def list_documents():
     return {"documents": docs, "active_document": active_pdf.name if active_pdf.exists() else None}
 
 
-@app.post("/api/documents/select", tags=["Document"])
+@app.post("/api/documents/select", tags=["Document"], summary="Select active PDF document")
 def select_document(req: DocumentSelectRequest):
     """Switch active report to an existing PDF in the data directory and reset QA engine."""
-    target_path = config.DATA_DIR / req.filename
+    target_path = sanitize_pdf_filename(req.filename)
     if not target_path.exists():
         raise HTTPException(status_code=404, detail=f"PDF file '{req.filename}' not found in data directory.")
 
@@ -279,11 +413,11 @@ def select_document(req: DocumentSelectRequest):
     }
 
 
-@app.get("/api/pdf", tags=["Document"])
+@app.get("/api/pdf", tags=["Document"], summary="Stream raw PDF bytes")
 def stream_pdf(filename: Optional[str] = Query(None, description="Optional filename to stream; defaults to active PDF")):
     """Stream PDF bytes for in-browser viewer or direct download."""
     if filename:
-        target = config.DATA_DIR / filename
+        target = sanitize_pdf_filename(filename)
     else:
         target = get_active_pdf()
 
@@ -297,11 +431,11 @@ def stream_pdf(filename: Optional[str] = Query(None, description="Optional filen
     )
 
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # Evidence & Page Rendering Endpoints
-# ---------------------------------------------------------------------------
+# ===========================================================================
 
-@app.get("/api/page/{page_number}/image", tags=["Evidence & Pages"])
+@app.get("/api/page/{page_number}/image", tags=["Evidence & Pages"], summary="Render highlighted PDF page image")
 def get_page_image(
     page_number: int,
     quote: Optional[str] = Query(None, description="Exact verbatim quote or table row to highlight on the page"),
@@ -353,7 +487,7 @@ def get_page_image(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/page/{page_number}/rects", tags=["Evidence & Pages"])
+@app.get("/api/page/{page_number}/rects", tags=["Evidence & Pages"], summary="Extract bounding box coordinates")
 def get_page_rects(
     page_number: int,
     quote: Optional[str] = Query(None, description="Quote to find coordinates for"),
@@ -403,12 +537,22 @@ def get_page_rects(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # Question Answering Endpoints
-# ---------------------------------------------------------------------------
+# ===========================================================================
 
-@app.post("/api/query", tags=["Question Answering"], summary="Direct JSON QA query (ideal for Swagger UI)")
-@app.post("/api/ask", tags=["Question Answering"], summary="Direct JSON QA query alias")
+@app.post(
+    "/api/query",
+    tags=["Question Answering"],
+    summary="Direct synchronous QA query",
+    dependencies=[Depends(check_rate_limit)]
+)
+@app.post(
+    "/api/ask",
+    tags=["Question Answering"],
+    summary="Direct synchronous QA query alias",
+    dependencies=[Depends(check_rate_limit)]
+)
 def direct_query_endpoint(req: ChatRequest):
     """
     Synchronous direct JSON QA endpoint. Ideal for testing queries in Swagger UI.
@@ -435,7 +579,12 @@ def direct_query_endpoint(req: ChatRequest):
         raise HTTPException(status_code=500, detail=f"QA pipeline error: {str(e)}")
 
 
-@app.post("/api/chat", tags=["Question Answering"], summary="Streaming SSE QA chat endpoint")
+@app.post(
+    "/api/chat",
+    tags=["Question Answering"],
+    summary="Streaming SSE QA chat endpoint",
+    dependencies=[Depends(check_rate_limit)]
+)
 async def chat_sse_stream(req: ChatRequest):
     """
     Server-Sent Events (SSE) stream for interactive chat.
@@ -485,9 +634,9 @@ async def chat_sse_stream(req: ChatRequest):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # Ingestion & Indexing Endpoints
-# ---------------------------------------------------------------------------
+# ===========================================================================
 
 def run_indexing_task(file_path: Path) -> Dict[str, Any]:
     """Execute ingestion and index construction for the given PDF file."""
@@ -550,21 +699,42 @@ async def upload_and_index(
     """
     Upload a new PDF report to the server and trigger ingestion & index construction.
     
-    - Ingests text blocks and structured tables with bounding boxes.
-    - Builds BM25 search index and dense embeddings.
-    - Sets the uploaded document as the active report.
-    - If `sync=True`: processes immediately and returns full stats.
-    - If `sync=False` (default): launches background indexing; track progress via `/api/index/status`.
+    Security & Validation:
+    - Path traversal prevention: sanitizes file basename.
+    - Magic-byte verification: checks for valid `%PDF` file header.
+    - Size cap: enforces `MAX_UPLOAD_SIZE_BYTES` (default 50MB).
+    - Sets uploaded document as active report upon successful ingestion.
     """
     global _index_status
-    if not file.filename.lower().endswith(".pdf"):
+    safe_name = Path(file.filename).name
+    if not safe_name.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files (.pdf) are supported.")
 
-    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
-    dest_path = config.DATA_DIR / file.filename
+    # Validate PDF magic bytes (%PDF)
+    head = await file.read(4)
+    if head != b"%PDF":
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file: uploaded file does not begin with standard %PDF signature."
+        )
 
+    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    dest_path = (config.DATA_DIR / safe_name).resolve()
+
+    # Stream to disk with size cap enforcement
+    bytes_written = 4
     with open(dest_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        buffer.write(head)
+        while chunk := await file.read(1024 * 1024):
+            bytes_written += len(chunk)
+            if bytes_written > config.MAX_UPLOAD_SIZE_BYTES:
+                buffer.close()
+                dest_path.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File exceeds maximum allowed upload size of {config.MAX_UPLOAD_SIZE_BYTES // (1024 * 1024)} MB."
+                )
+            buffer.write(chunk)
 
     set_active_pdf(dest_path)
 
@@ -573,8 +743,8 @@ async def upload_and_index(
             stats = run_indexing_task(dest_path)
             return {
                 "status": "complete",
-                "message": f"Uploaded and indexed {file.filename} successfully.",
-                "filename": file.filename,
+                "message": f"Uploaded and indexed {safe_name} successfully.",
+                "filename": safe_name,
                 "stats": stats
             }
         except Exception as e:
@@ -583,19 +753,19 @@ async def upload_and_index(
         _index_status = {
             "status": "starting",
             "progress": 5,
-            "message": f"Analysis queued for {file.filename}...",
-            "active_doc": file.filename
+            "message": f"Analysis queued for {safe_name}...",
+            "active_doc": safe_name
         }
         background_tasks.add_task(run_indexing_task, dest_path)
         return {
             "status": "starting",
-            "message": f"Uploaded {file.filename}. Indexing initiated in background.",
-            "filename": file.filename,
+            "message": f"Uploaded {safe_name}. Indexing initiated in background.",
+            "filename": safe_name,
             "check_status_url": "/api/index/status"
         }
 
 
-@app.get("/api/index/status", tags=["Ingestion & Indexing"])
+@app.get("/api/index/status", tags=["Ingestion & Indexing"], summary="Get indexing progress status")
 def get_indexing_status():
     """Returns the current status, progress percentage, and message of the document indexing pipeline."""
     return _index_status

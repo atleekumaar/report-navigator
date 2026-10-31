@@ -14,7 +14,7 @@ from api import app, set_active_pdf, get_active_pdf, reset_qa_engine
 import config
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def client():
     return TestClient(app)
 
@@ -243,3 +243,44 @@ def test_ingest_new_pdf_and_query_flow(client, sample_pdf_path):
         # Re-verify report_A is active
         res_back = client.get("/api/health")
         assert res_back.json()["active_doc"] == "report_A.pdf"
+
+
+def test_security_headers(client):
+    """Verify standard enterprise security headers are returned on all endpoints."""
+    res = client.get("/api/health")
+    assert res.status_code == 200
+    assert res.headers.get("x-content-type-options") == "nosniff"
+    assert res.headers.get("x-frame-options") == "DENY"
+    assert res.headers.get("x-xss-protection") == "1; mode=block"
+    assert res.headers.get("referrer-policy") == "strict-origin-when-cross-origin"
+
+
+def test_path_traversal_protection(client):
+    """Verify that path traversal attempts in document selection or streaming fail cleanly."""
+    res_select = client.post("/api/documents/select", json={"filename": "../../etc/passwd.pdf"})
+    assert res_select.status_code in (400, 404)
+
+    res_stream = client.get("/api/pdf?filename=../../secret.pdf")
+    assert res_stream.status_code in (400, 404)
+
+
+def test_upload_magic_bytes_validation(client):
+    """Verify uploading a file without valid %PDF magic bytes is rejected with 400."""
+    fake_content = b"THIS IS NOT A VALID PDF FILE"
+    files = {"file": ("malicious_payload.pdf", fake_content, "application/pdf")}
+    res = client.post("/api/upload?sync=true", files=files)
+    assert res.status_code == 400
+    assert "pdf" in res.text.lower()
+
+
+def test_feedback_endpoint(client):
+    """Verify submitting positive and negative user feedback works and persists."""
+    payload = {
+        "query": "What is the unemployment rate?",
+        "answer": "The overall unemployment rate is 4.8%.",
+        "rating": "positive",
+        "comment": "Accurate and verified against table."
+    }
+    res = client.post("/api/feedback", json=payload)
+    assert res.status_code == 200
+    assert res.json()["status"] == "success"
