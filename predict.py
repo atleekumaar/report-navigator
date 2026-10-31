@@ -65,11 +65,10 @@ def main():
     print(f"[predict] Answering {len(questions)} questions...")
     answers = []
 
-    for q in questions:
-        qid = q["id"]
-        question_text = q["question"]
-        qtype = q.get("qtype")
-        res = solver.solve(qid=qid, question=question_text, qtype=qtype)
+    for idx, q in enumerate(questions):
+        qid = q.get("id", f"Q{idx:03d}")
+        question_text = q.get("question", "")
+        res = solver.solve(qid=qid, question=question_text)
 
         answers.append({
             "id": res.qid,

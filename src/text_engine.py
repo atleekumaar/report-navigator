@@ -45,7 +45,7 @@ def _has_tesseract() -> bool:
     return _TESSERACT_AVAILABLE
 
 
-def ocr_page(doc: fitz.Document, page_idx: int, dpi: int = 200) -> str:
+def ocr_page(doc: fitz.Document, page_idx: int, dpi: int = 300) -> str:
     """Render *page_idx* and run Tesseract OCR.  Returns '' on failure."""
     if not _has_tesseract():
         return ""

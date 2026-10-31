@@ -143,7 +143,7 @@ def run_evaluation(gold_path: Path, pred_path: Optional[Path] = None, pdf_path: 
             questions = load_jsonl(gold_path)
             answers = []
             for q in questions:
-                res = solver.solve(qid=q.get("id", "Q00"), question=q.get("question", ""), qtype=q.get("qtype"))
+                res = solver.solve(qid=q.get("id", "Q00"), question=q.get("question", ""))
                 answers.append({
                     "id": res.qid,
                     "answer": res.answer,

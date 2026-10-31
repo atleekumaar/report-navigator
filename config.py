@@ -103,6 +103,30 @@ SYNONYMS = {
     # Geography (Indian states — extend for specific report)
     "india": ["nation", "national", "country", "all india", "nationwide"],
 
+    # Road Safety & Traffic Metrics
+    "killed": ["deaths", "died", "dead", "fatalities", "fatal", "death"],
+    "accidents": ["crashes", "collisions", "incidents", "mishaps", "road accidents"],
+    "injured": ["injuries", "grievously injured", "wounded", "hurt", "minor injuries"],
+
+    # Road User & Vehicle Categories
+    "two-wheeler": ["two wheeler", "2-wheeler", "motorcycle", "bike", "scooter", "moped"],
+    "pedestrian": ["pedestrians", "walking", "walker", "on foot"],
+    "bicycle": ["bicycles", "cycle", "cyclist", "cycles"],
+    "auto": ["auto-rickshaw", "auto rickshaw", "three-wheeler", "3-wheeler", "autorickshaw"],
+    "car": ["cars", "taxi", "taxis", "van", "vans", "lmv", "lmvs", "light motor vehicle"],
+    "truck": ["trucks", "lorry", "heavy goods vehicle", "hgv", "goods carrier"],
+    "bus": ["buses", "coach", "mini bus", "heavy passenger vehicle"],
+
+    # Traffic Violations & Causative Factors
+    "over-speeding": ["overspeeding", "speeding", "excessive speed", "speed violation"],
+    "drunken driving": ["drunk driving", "alcohol", "drugs", "drunken", "drink driving", "under influence"],
+    "red light": ["jumping red light", "red light jumping", "traffic light", "signal jumping", "signal violation"],
+    "mobile phone": ["use of mobile phone", "cell phone", "phone usage", "talking on phone"],
+    "wrong side": ["wrong-side driving", "driving on wrong side", "one-way violation", "wrong way"],
+
+    # Collision Types
+    "collision": ["run off road", "hit and run", "head on", "rear end", "side impact"],
+
     # Report structure
     "table": ["statement", "tabulation", "exhibit"],
     "chapter": ["section", "part"],

@@ -109,7 +109,7 @@ def ocr_page_text(page: fitz.Page, doc_path: Path) -> str:
     if shutil.which("tesseract"):
         try:
             import tempfile
-            mat = fitz.Matrix(2.0, 2.0)  # 2x zoom for better OCR
+            mat = fitz.Matrix(300 / 72, 300 / 72)  # ~300 DPI for high-accuracy OCR
             pix = page.get_pixmap(matrix=mat, alpha=False)
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_img:
                 pix.save(tmp_img.name)
