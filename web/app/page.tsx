@@ -8,7 +8,7 @@ import {
   PipelineStep,
   AnswerResponse,
 } from "@/lib/types";
-import { fetchDocMetadata, streamChat } from "@/lib/api";
+import { fetchDocMetadata, streamChat, uploadPdf, fetchIndexStatus } from "@/lib/api";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { Composer } from "@/components/chat/Composer";
 import { AnswerCard } from "@/components/chat/AnswerCard";
@@ -16,7 +16,7 @@ import { NotFoundCard } from "@/components/chat/NotFoundCard";
 import { PipelineStatus } from "@/components/chat/PipelineStatus";
 import { StarterChips } from "@/components/chat/StarterChips";
 import { EvidencePanel } from "@/components/evidence/EvidencePanel";
-import { Eye, EyeOff, Menu, AlertTriangle, RefreshCw } from "lucide-react";
+import { Eye, EyeOff, Menu, AlertTriangle, RefreshCw, CheckCircle2, AlertCircle } from "lucide-react";
 
 export default function Home() {
   const [metadata, setMetadata] = useState<DocumentMetadata>({
@@ -43,6 +43,18 @@ export default function Home() {
   const [showEvidencePanel, setShowEvidencePanel] = useState(true);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
+  // Upload & indexing state
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{
+    status?: string;
+    progress?: number;
+    message?: string;
+  } | null>(null);
+  const [uploadToast, setUploadToast] = useState<{
+    type: "success" | "error" | "info";
+    message: string;
+  } | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const loadMetadata = async () => {
@@ -66,6 +78,111 @@ export default function Home() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, currentPipelineStep]);
+
+  const handleUploadFile = async (file: File) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setUploadToast({
+        type: "error",
+        message: "Only PDF documents (.pdf) are supported.",
+      });
+      setTimeout(() => setUploadToast(null), 5000);
+      return;
+    }
+
+    setIsUploading(true);
+    setUploadProgress({
+      status: "starting",
+      progress: 10,
+      message: `Uploading ${file.name}...`,
+    });
+    setUploadToast({
+      type: "info",
+      message: `Uploading ${file.name} to server...`,
+    });
+
+    try {
+      const res = await uploadPdf(file);
+
+      // If backend processed synchronously (?sync=true)
+      if (res.status === "complete") {
+        setIsUploading(false);
+        setUploadProgress(null);
+        setUploadToast({
+          type: "success",
+          message: `Successfully loaded and indexed ${file.name}!`,
+        });
+        setTimeout(() => setUploadToast(null), 5000);
+        await loadMetadata();
+        setMessages([
+          {
+            id: `welcome-${Date.now()}`,
+            role: "assistant",
+            content: `📄 **New Session: ${file.name}**\n\nThe report has been fully analyzed and indexed (${res.stats?.total_chunks || "multiple"} sections, ${res.stats?.table_chunks || 0} tables).\n\nAsk any question about this document or choose a starter question below!`,
+          },
+        ]);
+        setSelectedCitation(null);
+        return;
+      }
+
+      setUploadProgress({
+        status: "ingesting",
+        progress: 25,
+        message: res.message || "Document uploaded. Ingesting text and tables...",
+      });
+      setUploadToast({
+        type: "info",
+        message: `Analyzing and indexing ${file.name}...`,
+      });
+
+      // Poll background indexing status
+      const pollTimer = setInterval(async () => {
+        try {
+          const status = await fetchIndexStatus();
+          setUploadProgress(status);
+
+          if (status.status === "complete") {
+            clearInterval(pollTimer);
+            setIsUploading(false);
+            setUploadProgress(null);
+            setUploadToast({
+              type: "success",
+              message: `Successfully loaded and indexed ${file.name}!`,
+            });
+            setTimeout(() => setUploadToast(null), 5000);
+            await loadMetadata();
+            setMessages([
+              {
+                id: `welcome-${Date.now()}`,
+                role: "assistant",
+                content: `📄 **New Session: ${file.name}**\n\nThe report has been fully analyzed and indexed.\n\nAsk any question about this document or choose a starter question below!`,
+                  },
+            ]);
+            setSelectedCitation(null);
+          } else if (status.status === "error") {
+            clearInterval(pollTimer);
+            setIsUploading(false);
+            setUploadProgress(null);
+            setUploadToast({
+              type: "error",
+              message: `Indexing failed: ${status.message}`,
+            });
+            setTimeout(() => setUploadToast(null), 7000);
+          }
+        } catch (pollErr) {
+          console.warn("Status polling error:", pollErr);
+        }
+      }, 1200);
+    } catch (err: any) {
+      setIsUploading(false);
+      setUploadProgress(null);
+      setUploadToast({
+        type: "error",
+        message: `Upload error: ${err.message || "Failed to upload file to backend"}`,
+      });
+      setTimeout(() => setUploadToast(null), 7000);
+    }
+  };
 
   const handleSendMessage = async (queryText: string) => {
     if (!queryText.trim() || isLoading) return;
@@ -182,6 +299,9 @@ export default function Home() {
             setSelectedCitation(null);
             setMobileSidebarOpen(false);
           }}
+          onUploadFile={handleUploadFile}
+          isUploading={isUploading}
+          uploadProgress={uploadProgress}
         />
       </div>
 
@@ -240,8 +360,40 @@ export default function Home() {
           </div>
         </header>
 
+        {/* Upload Status Toast Banner */}
+        {uploadToast && (
+          <div
+            className={`px-4 py-2 flex items-center justify-between text-xs backdrop-blur-md z-20 border-b transition-all ${
+              uploadToast.type === "success"
+                ? "bg-[#064E3B]/90 border-[#10B981]/50 text-[#D1FAE5]"
+                : uploadToast.type === "error"
+                ? "bg-[#7F1D1D]/90 border-[#EF4444]/50 text-[#FEE2E2]"
+                : "bg-[#4A0A30]/90 border-[#FF7AA8]/50 text-[#FFE4ED]"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {uploadToast.type === "info" ? (
+                <RefreshCw className="w-3.5 h-3.5 text-[#FF7AA8] animate-spin shrink-0" />
+              ) : uploadToast.type === "success" ? (
+                <CheckCircle2 className="w-3.5 h-3.5 text-[#10B981] shrink-0" />
+              ) : (
+                <AlertCircle className="w-3.5 h-3.5 text-[#EF4444] shrink-0" />
+              )}
+              <span className="font-medium">{uploadToast.message}</span>
+            </div>
+            {uploadToast.type !== "info" && (
+              <button
+                onClick={() => setUploadToast(null)}
+                className="text-xs opacity-75 hover:opacity-100 font-bold px-2 py-0.5"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Connection Notice & Retry Banner */}
-        {connectionError && (
+        {connectionError && !uploadToast && (
           <div className="bg-[#3D0823]/90 border-b border-[#FF4D8D]/35 px-4 py-2 flex items-center justify-between text-xs text-[#FFE4ED] backdrop-blur-md z-20">
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-[#FFA8C7] shrink-0" />

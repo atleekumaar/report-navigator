@@ -202,6 +202,11 @@ def reset_qa_engine():
     """Reset the global QAEngine instance so the next query reloads the index from disk."""
     global _qa_engine
     _qa_engine = None
+    try:
+        from qa import reset_solver
+        reset_solver()
+    except Exception:
+        pass
 
 
 # ===========================================================================
@@ -644,17 +649,22 @@ async def chat_sse_stream(req: ChatRequest):
                     )
                 )
                 latency_ms = int((time.time() - t0) * 1000)
-                # Log to Neon (best-effort)
-                active_pdf = get_active_pdf()
-                db.log_query(
-                    document_id=active_pdf.stem if active_pdf.exists() else None,
-                    query=req.query,
-                    answer=answer_payload.get("answer", ""),
-                    confidence=answer_payload.get("confidence"),
-                    citations=answer_payload.get("citations"),
-                    latency_ms=latency_ms,
-                )
+                # Deliver answer payload to client stream FIRST with zero delay
                 await queue.put({"event": "answer", "data": answer_payload})
+
+                # Best-effort query log to Neon in background
+                try:
+                    active_pdf = get_active_pdf()
+                    db.log_query(
+                        document_id=active_pdf.stem if active_pdf.exists() else None,
+                        query=req.query,
+                        answer=answer_payload.get("answer", ""),
+                        confidence=answer_payload.get("confidence"),
+                        citations=answer_payload.get("citations"),
+                        latency_ms=latency_ms,
+                    )
+                except Exception as log_err:
+                    print(f"[API] Best-effort DB query log failed: {log_err}")
             except Exception as e:
                 print(f"[API] Error during chat processing: {e}")
                 await queue.put({

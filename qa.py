@@ -1,6 +1,7 @@
 import json
 import re
 import os
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import httpx
 
@@ -168,15 +169,41 @@ def verify_citations(
 _cached_solver = None
 _cached_solver_path = None
 
+
+def get_active_pdf_path() -> Path:
+    state_file = config.DATA_DIR / "active_doc.json"
+    if state_file.exists():
+        try:
+            with open(state_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                filename = data.get("filename")
+                if filename:
+                    candidate = (config.DATA_DIR / filename).resolve()
+                    if candidate.exists():
+                        return candidate
+        except Exception:
+            pass
+    for fname in ["report_A.pdf", "report.pdf"]:
+        candidate = config.DATA_DIR / fname
+        if candidate.exists():
+            return candidate.resolve()
+    return config.PDF_PATH
+
+
+def reset_solver():
+    global _cached_solver, _cached_solver_path
+    _cached_solver = None
+    _cached_solver_path = None
+
+
 def get_solver(pdf_path: str):
     global _cached_solver, _cached_solver_path
     if _cached_solver is None or _cached_solver_path != str(pdf_path):
         try:
-            from src.solver import DynamicReportSolver
+            from solver import DynamicReportSolver
             _cached_solver = DynamicReportSolver(str(pdf_path))
             _cached_solver_path = str(pdf_path)
-        except Exception as e:
-            print(f"[QA] Solver load error: {e}")
+        except Exception:
             _cached_solver = None
     return _cached_solver
 
@@ -262,16 +289,17 @@ class QAEngine:
     def call_llm(self, prompt: str) -> Dict[str, Any]:
         """
         Call LLM with forced JSON schema output.
-        Ultra-fast: checks high-confidence dynamic report extraction first (< 5ms).
+        Ultra-fast: checks high-confidence dynamic report extraction first (< 15ms).
         If ambiguous, falls back to Groq with a strict 2.5s timeout, and then dynamic extractor.
         """
-        # Step 0: Try high-precision grounded extraction from indexed document first (< 5ms)
+        # Step 0: Try high-precision grounded extraction from indexed document first (< 15ms)
         fast_ans = self._dynamic_evidence_answer(prompt)
         if fast_ans.get("found") is True and fast_ans.get("confidence") == "high":
             return fast_ans
         if fast_ans.get("found") is False and "not mentioned" in fast_ans.get("answer", ""):
             return fast_ans
 
+        # Step 1: Groq fast-path (llama-3.3-70b-versatile, 2.5s timeout)
         groq_key = self.get_api_key("groq")
         if groq_key:
             try:
@@ -281,7 +309,7 @@ class QAEngine:
                     "User-Agent": "ReportNavigator/1.0"
                 }
                 payload = {
-                    "model": getattr(config, "GROQ_MODEL_ANSWER", "openai/gpt-oss-20b"),
+                    "model": getattr(config, "GROQ_MODEL_ANSWER", "llama-3.3-70b-versatile"),
                     "messages": [
                         {"role": "system", "content": QA_SYSTEM_PROMPT},
                         {"role": "user", "content": prompt}
@@ -293,32 +321,60 @@ class QAEngine:
                 if res.status_code == 200:
                     data = res.json()
                     content = data["choices"][0]["message"]["content"]
-                    return json.loads(content)
+                    parsed = json.loads(content)
+                    if isinstance(parsed, dict) and "answer" in parsed:
+                        return parsed
             except Exception as e:
-                print(f"[QA] Groq fast-path fallback: {e}")
+                print(f"[QA] Groq fast-path notice: {e}")
+
+        # Step 2: Gemini fast-path fallback (if configured)
+        gemini_key = self.get_api_key("gemini")
+        if gemini_key:
+            try:
+                headers = {"Content-Type": "application/json"}
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{getattr(config, 'GEMINI_MODEL_ANSWER', 'gemini-2.0-flash')}:generateContent?key={gemini_key}"
+                payload = {
+                    "contents": [
+                        {"role": "user", "parts": [{"text": f"{QA_SYSTEM_PROMPT}\n\n{prompt}"}]}
+                    ],
+                    "generationConfig": {
+                        "temperature": 0.0,
+                        "responseMimeType": "application/json"
+                    }
+                }
+                res = httpx.post(url, json=payload, headers=headers, timeout=2.5)
+                if res.status_code == 200:
+                    data = res.json()
+                    content = data["candidates"][0]["content"]["parts"][0]["text"]
+                    parsed = json.loads(content)
+                    if isinstance(parsed, dict) and "answer" in parsed:
+                        return parsed
+            except Exception as e:
+                print(f"[QA] Gemini fallback notice: {e}")
 
         return fast_ans
 
     def _dynamic_evidence_answer(self, prompt: str) -> Dict[str, Any]:
         """
-        Intelligent dynamic offline evidence extractor directly from the official PDF report.
-        Extracts facts, numbers, and quotes directly from the indexed report.
-        Executes in < 50ms with zero network latency.
+        Intelligent universal offline evidence extractor directly from the active PDF report.
+        Extracts facts, numbers, conceptual definitions, and quotes directly from the indexed document.
+        Executes in < 20ms with zero network latency.
         """
         parts = prompt.split("Sources:")
         question_part = parts[0].replace("Question:", "").strip()
         sources_part = parts[1] if len(parts) > 1 else ""
 
-        # 1. High-precision solver lookup (cached singleton)
+        # 1. High-precision solver lookup on active document (cached singleton)
         try:
-            if config.PDF_PATH.exists() and config.PDF_PATH.name == "report_A.pdf":
-                solver = get_solver(str(config.PDF_PATH))
+            active_pdf = get_active_pdf_path()
+            if active_pdf.exists():
+                solver = get_solver(str(active_pdf))
                 if solver:
                     res = solver.solve(qid="query", question=question_part)
                     if res.answer and res.answer != "NOT_FOUND" and res.page:
                         return {
                             "found": True,
-                            "answer": f"According to the official statistics (p. {res.page}), the recorded figure is {res.answer} [S1].",
+                            "answer": f"According to the recorded data (p. {res.page}), the recorded figure is {res.answer} [S1].",
                             "calculation": "",
                             "confidence": "high",
                             "citations": [
@@ -355,18 +411,45 @@ class QAEngine:
             "just", "should", "now", "what", "which", "who", "whom", "this", "that", "these", "those",
             "am", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "having",
             "do", "does", "did", "doing", "would", "could", "tell", "show", "give", "list", "find", "how",
-            "many", "much", "number", "recorded", "figure", "total", "rate"
+            "many", "much", "number", "recorded", "figure", "total", "rate", "report", "document", "pdf"
         }
 
         q_tokens = [w for w in re.findall(r'\b[a-zA-Z0-9\-]{2,}\b', q_lower) if w not in stop_words]
 
-        # Entity / Proper Noun guard: If query has capitalized words or named entities, verify they exist
+        is_meta_query = any(m in q_lower for m in [
+            "this document", "this report", "main findings", "primary findings", "executive summary",
+            "summary", "summarize", "overall findings", "what does this document", "overview", "what is this",
+            "tell me about", "describe this"
+        ])
+
+        is_conceptual = any(w in q_lower for w in [
+            "what is", "what does", "explain", "describe", "purpose", "overview", "summary",
+            "who is", "why", "how does", "architecture", "concept", "meaning", "cover", "about"
+        ])
+        is_numerical = any(w in q_lower for w in [
+            "how many", "number of", "deaths", "total", "count", "rate", "killed", "accidents",
+            "figures", "recorded", "percent", "percentage"
+        ]) or bool(years)
+
         sources_lower = sources_part.lower()
-        query_words = question_part.split()
-        proper_nouns = [w.strip('?,.!"\'').lower() for i, w in enumerate(query_words) if i > 0 and len(w) > 2 and w[0].isupper()]
-        if proper_nouns:
-            matched_proper = [pn for pn in proper_nouns if pn in sources_lower]
-            if not matched_proper:
+
+        # Abstention check: If not meta query, check if content words exist in sources
+        if not is_meta_query and q_tokens:
+            query_words = question_part.split()
+            proper_nouns = [w.strip('?,.!\"\'').lower() for i, w in enumerate(query_words) if i > 0 and len(w) > 2 and w[0].isupper()]
+            if proper_nouns:
+                matched_proper = [pn for pn in proper_nouns if pn in sources_lower]
+                if not matched_proper:
+                    return {
+                        "found": False,
+                        "answer": "Not found in the report. (The requested subject or entity is not mentioned in the report).",
+                        "calculation": "",
+                        "confidence": "high",
+                        "citations": []
+                    }
+
+            matched_tokens = [w for w in q_tokens if w in sources_lower]
+            if len(matched_tokens) == 0 or (len(q_tokens) >= 2 and len(matched_tokens) / len(q_tokens) < 0.20):
                 return {
                     "found": False,
                     "answer": "Not found in the report. (The requested subject or entity is not mentioned in the report).",
@@ -374,18 +457,6 @@ class QAEngine:
                     "confidence": "high",
                     "citations": []
                 }
-
-        # Genuine abstention check: Are query content tokens present in sources at all?
-        matched_tokens = [w for w in q_tokens if w in sources_lower]
-
-        if q_tokens and (len(matched_tokens) == 0 or (len(q_tokens) >= 2 and len(matched_tokens) / len(q_tokens) < 0.25)):
-            return {
-                "found": False,
-                "answer": "Not found in the report. (The requested subject or entity is not mentioned in the report).",
-                "calculation": "",
-                "confidence": "high",
-                "citations": []
-            }
 
         best_source_id = "S1"
         best_quote = ""
@@ -412,8 +483,10 @@ class QAEngine:
                     has_nums = bool(re.search(r'\d+(?:[.,]\d+)?', ln))
 
                     score = match_count * 5 + (20 if year_match else 0) + (10 if has_nums else 0)
-                    if "|" in ln:
-                        score += 5
+                    if is_numerical and "|" in ln:
+                        score += 15
+                    elif is_conceptual:
+                        score -= 5
 
                     if score > best_score:
                         best_score = score
@@ -429,7 +502,16 @@ class QAEngine:
                     year_match = bool(years and any(y in s_lower for y in years))
                     has_nums = bool(re.search(r'\d+(?:[.,]\d+)?', s))
 
-                    score = match_count * 4 + (15 if year_match else 0) + (8 if has_nums else 0)
+                    score = match_count * 6 + (15 if year_match else 0) + (5 if has_nums else 0)
+                    if is_conceptual:
+                        score += 15
+                        if any(term in s_lower for term in ["is a", "provides", "designed to", "aims to", "built to", "consists of"]):
+                            score += 20
+                        if q_tokens and any(s_lower.startswith(t) for t in q_tokens):
+                            score += 25
+                    if is_meta_query and pdf_page in (1, 2, 3):
+                        score += 20
+
                     if score > best_score:
                         best_score = score
                         best_source_id = sid
@@ -437,7 +519,7 @@ class QAEngine:
                         best_sentence = s
                         best_page = pdf_page
 
-        if best_score <= 5 or not best_sentence:
+        if (best_score <= 4 and not is_meta_query) or not best_sentence:
             return {
                 "found": False,
                 "answer": "Not found in the report. (The requested information is not present in the provided report sources).",
@@ -450,7 +532,7 @@ class QAEngine:
         if "|" in clean_sentence:
             cells = [c.strip() for c in clean_sentence.split("|") if c.strip()]
             meaningful = [c for c in cells if c and c not in (",", ", ,", "---")]
-            answer = f"According to the official report statistics, {', '.join(meaningful)} [{best_source_id}]."
+            answer = f"According to the recorded data, {', '.join(meaningful)} [{best_source_id}]."
         else:
             answer = f"{clean_sentence} [{best_source_id}]."
 

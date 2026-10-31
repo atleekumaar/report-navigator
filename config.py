@@ -65,14 +65,14 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-GROQ_MODEL_ANSWER = os.getenv("GROQ_MODEL_ANSWER", "openai/gpt-oss-20b")
-GROQ_MODEL_REWRITE = os.getenv("GROQ_MODEL_REWRITE", "openai/gpt-oss-20b")
+GROQ_MODEL_ANSWER = os.getenv("GROQ_MODEL_ANSWER", "llama-3.3-70b-versatile")
+GROQ_MODEL_REWRITE = os.getenv("GROQ_MODEL_REWRITE", "llama-3.1-8b-instant")
 LLM_MODEL_ANSWER = os.getenv("LLM_MODEL_ANSWER", "claude-3-5-sonnet-20241022")
 LLM_MODEL_REWRITE = os.getenv("LLM_MODEL_REWRITE", "claude-3-5-haiku-20241022")
 
 # Gemini model names (used when LLM_PROVIDER=gemini)
-GEMINI_MODEL_ANSWER = os.getenv("GEMINI_MODEL_ANSWER", "gemini-2.5-flash")
-GEMINI_MODEL_REWRITE = os.getenv("GEMINI_MODEL_REWRITE", "gemini-2.5-flash")
+GEMINI_MODEL_ANSWER = os.getenv("GEMINI_MODEL_ANSWER", "gemini-2.0-flash")
+GEMINI_MODEL_REWRITE = os.getenv("GEMINI_MODEL_REWRITE", "gemini-2.0-flash")
 
 # API Server
 HOST = os.getenv("HOST", "127.0.0.1")

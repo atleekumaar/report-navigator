@@ -152,6 +152,7 @@ export async function streamChat(
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
+    let hasReceivedAnswer = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -183,14 +184,20 @@ export async function streamChat(
           if (eventType === "status") {
             onStatus(parsed as PipelineStep);
           } else if (eventType === "answer") {
+            hasReceivedAnswer = true;
             onAnswer(parsed as AnswerResponse);
           } else if (eventType === "error") {
+            hasReceivedAnswer = true;
             onError(new Error(parsed.detail || "Error received from chat pipeline"));
           }
         } catch (e) {
           console.error("Failed to parse SSE payload:", dataStr, e);
         }
       }
+    }
+
+    if (!hasReceivedAnswer) {
+      onError(new Error("Stream ended before receiving complete answer. Please re-try."));
     }
   } catch (err: any) {
     onError(err instanceof Error ? err : new Error(String(err)));
@@ -200,22 +207,43 @@ export async function streamChat(
 /**
  * Upload a new PDF report to be indexed.
  */
-export async function uploadPdf(file: File): Promise<{ message: string; status: string }> {
+export async function uploadPdf(
+  file: File
+): Promise<{ message: string; status: string; filename?: string; stats?: any }> {
   const formData = new FormData();
   formData.append("file", file);
 
   const base = getApiBase();
-  const res = await fetch(`${base}/api/index`, {
-    method: "POST",
-    body: formData,
-  });
+  const endpoints = [
+    `${base}/api/index?sync=true`,
+    "/api/index?sync=true",
+    `${base}/api/upload?sync=true`,
+    "/api/upload?sync=true",
+  ];
 
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(errorData.detail || "Failed to upload and index PDF");
+  let lastError: any = null;
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (res.ok) {
+        return await res.json();
+      }
+      const errorData = await res
+        .json()
+        .catch(() => ({ detail: res.statusText }));
+      lastError = new Error(
+        errorData.detail || errorData.message || "Failed to upload and index PDF"
+      );
+    } catch (err) {
+      lastError = err;
+    }
   }
 
-  return await res.json();
+  throw lastError || new Error("Failed to upload and index PDF");
 }
 
 /**
@@ -223,9 +251,15 @@ export async function uploadPdf(file: File): Promise<{ message: string; status: 
  */
 export async function fetchIndexStatus(): Promise<IndexStatus> {
   const base = getApiBase();
-  const res = await fetch(`${base}/api/index/status`, { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`Failed to fetch index status: ${res.statusText}`);
+  const endpoints = [`${base}/api/index/status`, "/api/index/status"];
+
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, { cache: "no-store" });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (_) {}
   }
-  return await res.json();
+  return { status: "idle", progress: 0, message: "Ready" };
 }

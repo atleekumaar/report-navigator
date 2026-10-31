@@ -84,7 +84,7 @@ def _get_connection():
         url = DATABASE_URL
         sep = "&" if "?" in url else "?"
         if "connect_timeout" not in url:
-            url = url + sep + "connect_timeout=10"
+            url = url + sep + "connect_timeout=2"
         return psycopg.connect(url, autocommit=True)
     except Exception as e:
         print(f"[DB] Connection failed: {e}")
@@ -108,7 +108,7 @@ def init_database() -> Dict[str, Any]:
         url = DATABASE_URL
         sep = "&" if "?" in url else "?"
         if "connect_timeout" not in url:
-            url = url + sep + "connect_timeout=10"
+            url = url + sep + "connect_timeout=2"
         with psycopg.connect(url, autocommit=True) as conn:
             with conn.cursor() as cur:
                 cur.execute(POSTGRES_SCHEMA_SQL)

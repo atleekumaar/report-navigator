@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   Check,
   Layers,
+  Loader2,
 } from "lucide-react";
 import { PagodaLandscapeSilhouette } from "@/components/ui/Illustrations";
 
@@ -18,18 +19,28 @@ interface SidebarProps {
   onNewChat: () => void;
   onUploadFile?: (file: File) => void;
   onOpenDocModal?: () => void;
+  isUploading?: boolean;
+  uploadProgress?: {
+    status?: string;
+    progress?: number;
+    message?: string;
+  } | null;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   metadata,
   onNewChat,
   onUploadFile,
+  isUploading = false,
+  uploadProgress = null,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0] && onUploadFile) {
-      onUploadFile(e.target.files[0]);
+      const file = e.target.files[0];
+      onUploadFile(file);
+      e.target.value = "";
     }
   };
 
@@ -75,13 +86,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span className="flex items-center gap-1.5">
               <span
                 className={`w-2 h-2 rounded-full ${
-                  metadata.page_count > 0
+                  isUploading
+                    ? "bg-[#3B82F6] shadow-[0_0_8px_#3B82F6] animate-ping"
+                    : metadata.page_count > 0
                     ? "bg-[#10B981] shadow-[0_0_8px_#10B981] animate-pulse"
                     : "bg-[#F59E0B] shadow-[0_0_8px_#F59E0B]"
                 }`}
               />
               <span className="text-[9px] font-mono text-[#D89AB3]">
-                {metadata.page_count > 0 ? "Live" : "Syncing"}
+                {isUploading ? "Indexing" : metadata.page_count > 0 ? "Live" : "Syncing"}
               </span>
             </span>
           </div>
@@ -121,18 +134,45 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf"
+            accept=".pdf,application/pdf"
             onChange={handleFileChange}
+            disabled={isUploading}
             className="hidden"
           />
 
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-xl bg-[#4A0A30]/50 hover:bg-[#5E0D3E]/70 border border-[#FF7AA8]/30 hover:border-[#FF7AA8]/60 text-[11px] font-medium text-[#FFE4ED] transition-all shadow-sm"
+            disabled={isUploading}
+            className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-[#4A0A30]/60 hover:bg-[#5E0D3E]/80 border border-[#FF7AA8]/40 hover:border-[#FF7AA8]/70 text-[11px] font-semibold text-[#FFE4ED] transition-all shadow-sm active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <Upload className="w-3 h-3 text-[#FF7AA8]" />
-            <span>Upload Another PDF</span>
+            {isUploading ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 text-[#FF7AA8] animate-spin shrink-0" />
+                <span className="truncate">
+                  {uploadProgress?.message || "Uploading..."}
+                </span>
+              </>
+            ) : (
+              <>
+                <Upload className="w-3.5 h-3.5 text-[#FF7AA8] shrink-0" />
+                <span>Upload Another PDF</span>
+              </>
+            )}
           </button>
+
+          {isUploading && uploadProgress && (
+            <div className="w-full space-y-1.5 pt-1">
+              <div className="w-full bg-[#230416] rounded-full h-1.5 overflow-hidden border border-[#7D1B4D]/35">
+                <div
+                  className="bg-gradient-to-r from-[#FF6EA7] to-[#B8165B] h-1.5 rounded-full transition-all duration-300"
+                  style={{ width: `${Math.max(10, uploadProgress.progress || 0)}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-[#FFA3C5] font-mono text-center truncate">
+                {uploadProgress.progress ? `${uploadProgress.progress}% - ` : ""}{uploadProgress.message || "Processing..."}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Judge Verification Checklist */}
