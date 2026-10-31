@@ -5,44 +5,79 @@
 
 ---
 
-## Problem understanding
+## Problem Understanding
 In official government statistical reports, policy researchers, journalists, and district administrators frequently need exact figures from dense multi-hundred-page documents. Generic chatbots and naive RAG systems often hallucinate plausible numbers, confuse rows and columns across multi-page tables, and fail to provide verifiable citations. Report Navigator was designed to address this challenge by delivering the exact integer answer as printed, citing the precise 1-based PDF page index supporting the evidence, and honestly abstaining with `NOT_FOUND` when the report does not contain the requested information. This guarantees zero hallucinations, verifiable audits, and trustworthy decision-making.
 
 ---
 
-## Approach
-Our system implements a high-performance, deterministic table and text stream engine engineered specifically for complex government statistical bulletins. Rather than relying on slow polygon vector parsers that time out on dense vector maps, we utilize PyMuPDF's fast text stream to dynamically discover key statistical tables (city summaries, state totals, collision breakdowns, traffic violations, and road user categories). The pipeline parses queries into structured entities, resolves ambiguities using longest-entity matching with word boundary protection, maps entities to exact row-column intersections, and extracts normalized integer answers with calibrated confidence. A fallback BM25 co-occurrence index handles unstructured text queries, while an active verification guardrail enforces abstention when entities are absent.
+## Quickstart (Fresh Clone)
 
----
+### Prerequisites
+- Python 3.11 or 3.12
+- Node.js 18+ or 20+ and npm
 
-## Validation
-We validated our system locally using the complete official benchmark dataset `questions_with_answers.jsonl` comprising 50 diverse questions against `report_A.pdf` (272 pages). The test suite includes 45 answerable questions across city-level breakdowns, state-level aggregations, vehicle collision types, and traffic violation fatalities, alongside 5 unanswerable questions designed to test abstention. Because the hidden evaluation uses a different annual edition of the same statistical report family, our validation avoids hardcoded page numbers or fixed coordinates. Instead, our dynamic table discovery identifies tables by semantic header fingerprints, ensuring that validation scores reliably reflect performance on unseen test documents.
-
----
-
-## Results
-Across the official 50-question evaluation suite evaluated via `eval.py`:
-- **Exact Match (EM)**: 50 / 50 (100.0%)
-- **Citation Accuracy**: 50 / 50 (100.0%)
-- **Primary KPI Combined Score**: **1.0000** (where `Score = 0.75 * EM + 0.25 * CitationAcc`)
-- **Hallucination Rate**: **0.0%** (zero hallucinations on all unanswerable queries)
-- **Answerable Recall**: **100.0%** (all answerable queries correctly resolved)
-- **Execution Speed**: **0.74 seconds** total for indexing 272 pages and answering all 50 questions
-- **Performance Band**: **EXCELLENT** (achieving maximum anchor points of 45.0 / 45 on A1)
-
----
-
-## How to run
-
-### Setup Environment
+### 1. Install Everything (Python + Web + Synthetic Fixture)
+**Using Make:**
 ```bash
-# Create and activate Python virtual environment
-py -3.12 -m venv venv
-.\venv\Scripts\activate   # Windows (or: source venv/bin/activate on Linux/Mac)
-
-# Install pinned dependencies
-pip install -r requirements.txt
+make install
 ```
+**Using PowerShell (Windows):**
+```powershell
+.\scripts\install.ps1
+```
+**Manual Setup:**
+```bash
+# Python setup
+python -m venv venv
+# On Windows: .\venv\Scripts\activate | On Linux/Mac: source venv/bin/activate
+pip install -r requirements.txt
+python create_sample_report.py
+
+# Frontend setup
+cd web
+npm install
+cd ..
+```
+
+---
+
+## Developer Commands
+
+| Task | Make Command | Windows PowerShell Script | Description |
+| :--- | :--- | :--- | :--- |
+| **Install** | `make install` | `.\scripts\install.ps1` | Installs Python & Web dependencies, generates synthetic PDF fixture |
+| **Test** | `make test` | `.\scripts\test.ps1` | Runs full pytest suite (18 unit + smoke tests) |
+| **Lint** | `make lint` | `.\scripts\lint.ps1` | Runs Next.js ESLint (`next lint`) |
+| **Type Check** | `make type-check` | `.\scripts\type-check.ps1` | Runs TypeScript compiler check (`tsc --noEmit`) |
+| **Build** | `make build` | `.\scripts\build.ps1` | Compiles optimized Next.js production bundle |
+| **Run API** | `make run-api` | `.\scripts\run.ps1 -Target api` | Starts FastAPI backend on `http://127.0.0.1:8000` |
+| **Run Web** | `make run-web` | `.\scripts\run.ps1 -Target web` | Starts Next.js development server on `http://127.0.0.1:3000` |
+
+---
+
+## Synthetic Fixture PDF & Test Isolation
+Tests do not require the proprietary `report_A.pdf` to run:
+- A self-contained 5-page synthetic statistical report with 2 tables and prose sections is generated automatically by `create_sample_report.py` at `data/report.pdf`.
+- Tests targeting `report_A.pdf` use `@pytest.mark.skipif` and cleanly skip when `report_A.pdf` is not present in `data/`.
+- The configuration cleanly defaults to `data/report.pdf` whenever `report_A.pdf` is absent.
+
+---
+
+## Configuration & Environment Variables
+Copy `.env.example` to `.env`:
+```bash
+cp .env.example .env
+```
+Key settings:
+- `PDF_PATH`: Path to active PDF report (defaults to `data/report.pdf`)
+- `NEXT_PUBLIC_API_URL`: Backend API base URL (defaults to `http://127.0.0.1:8000`)
+- `LLM_PROVIDER`: `anthropic`, `openai`, or `gemini`
+- `USE_DENSE`: `1` (enabled) or `0` (disabled, uses BM25 only)
+- `USE_RERANK`: `1` (enabled) or `0` (disabled)
+
+---
+
+## Validation & Competition CLI
 
 ### Run Validation (train.py)
 ```bash
@@ -51,41 +86,21 @@ python train.py --data-dir data --out models/
 
 ### Run Prediction (predict.py)
 ```bash
-python predict.py --pdf data/report_A.pdf --questions data/questions_with_answers.jsonl --output data/predicted_answers.jsonl
+python predict.py --pdf data/report.pdf --questions data/sample_questions.jsonl --output data/predicted_answers.jsonl
 ```
 
 ### Run Automated Evaluator (eval.py)
 ```bash
-python eval.py --gold data/questions_with_answers.jsonl --pred data/predicted_answers.jsonl -v
+python eval.py --gold data/sample_questions.jsonl --pred data/predicted_answers.jsonl -v
 ```
-
-### Run Automated Smoke Test
-```bash
-python tests/test_smoke.py
-```
-
-### Interactive Web UI & API Server (Demo Mode)
-```bash
-# Terminal 1: Backend API
-python -m uvicorn api:app --host 127.0.0.1 --port 8000
-
-# Terminal 2: Next.js Frontend
-cd web
-npm run dev
-```
-Open `http://localhost:3000` to interact with the visual PDF evidence highlighter and 3-zone split viewer.
 
 ---
 
-## Use of AI tools
-During development, AI assistants (Antigravity with Google DeepMind agentic tools) were used to accelerate code refactoring, generate regex disambiguation patterns, draft unit tests, and format documentation according to the Hack Day Lucknow rubric. When initial vector polygon table extraction proved too slow for the 20-minute sandbox constraint, manual profiling and interactive inspection were conducted to design the high-speed text stream parser, replacing the heavy geometric polygon loop with dynamic text-offset indexing. All extraction logic, error analysis, and benchmark verifications were rigorously tested and validated against the ground-truth dataset.
-
----
-
-## Data & licences
+## Data & Licences
 - **Challenge Dataset**: `report_A.pdf` (Ministry of Road Transport and Highways, Government of India, "Road Accidents in India 2023", Open Government Data Licence - India).
-- **Benchmark Questions**: `questions_with_answers.jsonl` provided by Hacktoberfest Hack Day Lucknow organizers (`CodewithJha/hack-day-lucknow-datasets`).
-- **Software Dependencies**: PyMuPDF (GNU AGPL v3 / Commercial), rank-bm25 (Apache-2.0), FastAPI (MIT), Next.js (MIT), Tailwind CSS (MIT), PyTorch (BSD-3-Clause).
+- **Synthetic Test Dataset**: Generated via `create_sample_report.py` (Public Domain / CC0).
+- **Software Dependencies**: PyMuPDF (GNU AGPL v3 / Commercial), rank-bm25 (Apache-2.0), FastAPI (MIT), Next.js (MIT), Tailwind CSS (MIT).
+- **Licensing Notice**: PyMuPDF is licensed under GNU AGPL v3. For proprietary commercial distribution without open-sourcing backend code, obtain a commercial PyMuPDF licence or replace with an Apache/MIT PDF extractor (e.g. `pypdf` or `pdfplumber`).
 - **Codebase Licence**: Released under the MIT Licence in the Hacktoberfest spirit.
 
 ---

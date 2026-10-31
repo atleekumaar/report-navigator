@@ -27,7 +27,7 @@ export const TraceTimeline: React.FC<TraceTimelineProps> = ({ trace }) => {
         </div>
         <div className="text-slate-400">
           <span className="text-slate-500">Standalone query:</span>{" "}
-          <span className="text-slate-200 font-medium">"{trace.standalone_query}"</span>
+          <span className="text-slate-200 font-medium">&ldquo;{trace.standalone_query}&rdquo;</span>
         </div>
         {trace.keywords?.length > 0 && (
           <div>
@@ -86,4 +86,5 @@ export const TraceTimeline: React.FC<TraceTimelineProps> = ({ trace }) => {
     </div>
   );
 };
+
 

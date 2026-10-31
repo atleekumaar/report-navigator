@@ -244,7 +244,7 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
                   Cited Snippet
                 </span>
                 <p className="font-mono text-indigo-300 p-2 rounded bg-black/40 border border-white/5">
-                  "{citation.quote}"
+                  &ldquo;{citation.quote}&rdquo;
                 </p>
               </div>
 
@@ -255,7 +255,7 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
                     Structured Table (Cited row highlighted)
                   </h5>
                   <TableEvidence
-                    markdownTable={citation.full_text}
+                    markdownTable={citation.full_text || ""}
                     highlightQuote={citation.quote}
                   />
                 </div>
@@ -321,4 +321,6 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
     </div>
   );
 };
+
+
 

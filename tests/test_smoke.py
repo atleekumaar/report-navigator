@@ -8,24 +8,15 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+import pytest
 
-def test_smoke():
+
+def _run_predict_and_validate(pdf_path: Path, questions_path: Path):
     repo_root = Path(__file__).resolve().parent.parent
-    pdf_path = repo_root / "data" / "report_A.pdf"
-    if not pdf_path.exists():
-        pdfs = list((repo_root / "data").glob("*.pdf"))
-        if pdfs:
-            pdf_path = pdfs[0]
-    questions_path = repo_root / "data" / "questions_with_answers.jsonl"
-    
-    assert pdf_path.exists(), f"PDF report missing in {repo_root / 'data'}"
-    assert questions_path.exists(), f"Questions missing at {questions_path}"
-
     with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as tmp_out:
         out_path = Path(tmp_out.name)
 
     try:
-        # Run predict.py via subprocess
         cmd = [
             sys.executable,
             str(repo_root / "predict.py"),
@@ -36,7 +27,6 @@ def test_smoke():
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         assert result.returncode == 0, f"predict.py failed: {result.stderr}"
 
-        # Verify output JSONL schema
         lines = [line.strip() for line in out_path.read_text(encoding="utf-8").splitlines() if line.strip()]
         assert len(lines) > 0, "No answers output by predict.py"
 
@@ -52,11 +42,42 @@ def test_smoke():
                 assert item["answer"].isdigit(), f"Answer must be digits only: {item['answer']}"
                 assert isinstance(item["page"], int), "Page must be integer for answered queries"
 
-        print(f"Smoke test passed! Verified {len(lines)} answers.")
+        return len(lines)
     finally:
         if out_path.exists():
             out_path.unlink()
 
+
+def test_smoke():
+    """Smoke test running on the synthetic test fixture report."""
+    repo_root = Path(__file__).resolve().parent.parent
+    pdf_path = repo_root / "data" / "report.pdf"
+    if not pdf_path.exists():
+        from create_sample_report import generate_sample_pdf
+        generate_sample_pdf(pdf_path)
+
+    questions_path = repo_root / "data" / "sample_questions.jsonl"
+    if not questions_path.exists():
+        questions_path = repo_root / "data" / "questions_with_answers.jsonl"
+
+    count = _run_predict_and_validate(pdf_path, questions_path)
+    print(f"Smoke test passed! Verified {count} answers on synthetic report.")
+
+
+def test_smoke_report_a():
+    """Optional smoke test on proprietary report_A.pdf (skipped when absent)."""
+    repo_root = Path(__file__).resolve().parent.parent
+    pdf_path = repo_root / "data" / "report_A.pdf"
+    if not pdf_path.exists():
+        pytest.skip("Proprietary report_A.pdf not found in data/ directory; skipping.")
+
+    questions_path = repo_root / "data" / "questions_with_answers.jsonl"
+    if not questions_path.exists():
+        pytest.skip("questions_with_answers.jsonl not found in data/ directory; skipping.")
+
+    count = _run_predict_and_validate(pdf_path, questions_path)
+    print(f"Smoke test passed! Verified {count} answers on report_A.pdf.")
+
+
 if __name__ == "__main__":
     test_smoke()
-

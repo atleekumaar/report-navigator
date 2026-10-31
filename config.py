@@ -122,7 +122,8 @@ SYNONYMS = {
     "drunken driving": ["drunk driving", "alcohol", "drugs", "drunken", "drink driving", "under influence"],
     "red light": ["jumping red light", "red light jumping", "traffic light", "signal jumping", "signal violation"],
     "mobile phone": ["use of mobile phone", "cell phone", "phone usage", "talking on phone"],
-    "wrong side": ["wrong-side driving", "driving on wrong side", "one-way violation", "wrong way"],
+    "wrong side": ["wrong-side", "wrong-side driving", "driving on wrong side", "one-way violation", "wrong way"],
+    "wrong-side": ["wrong side", "wrong-side driving", "driving on wrong side", "one-way violation", "wrong way"],
 
     # Collision Types
     "collision": ["run off road", "hit and run", "head on", "rear end", "side impact"],

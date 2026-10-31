@@ -54,7 +54,7 @@ export const CitationChip: React.FC<CitationChipProps> = ({
             <span className="capitalize text-slate-500">{citation.type}</span>
           </div>
           <p className="text-xs text-slate-300 line-clamp-3 italic font-mono bg-black/30 p-1.5 rounded border border-white/5">
-            "{citation.quote}"
+            &ldquo;{citation.quote}&rdquo;
           </p>
           <div className="mt-1.5 flex items-center gap-1 text-[10px]">
             {citation.verified ? (
@@ -72,4 +72,5 @@ export const CitationChip: React.FC<CitationChipProps> = ({
     </span>
   );
 };
+
 

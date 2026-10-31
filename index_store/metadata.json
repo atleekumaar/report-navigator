@@ -1,6 +1,11 @@
 {
-  "num_chunks": 4,
+  "num_chunks": 7,
+  "text_chunks": 5,
+  "table_chunks": 2,
+  "unique_pages": 5,
+  "unique_tables": 2,
   "has_bm25": true,
-  "has_dense": true,
-  "embedding_model": "BAAI/bge-small-en-v1.5"
+  "has_dense": false,
+  "embedding_model": "BAAI/bge-small-en-v1.5",
+  "embedding_dim": 0
 }
