@@ -53,3 +53,7 @@ yarn-error.log*
 *.tsbuildinfo
 .neon
 node_modules/
+
+# Local scratch & test caches
+scratch/
+data/sample_report.pdf

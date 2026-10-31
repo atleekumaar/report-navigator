@@ -23,7 +23,7 @@ from src.solver import DynamicReportSolver, clean_int, Answer
 @pytest.fixture(scope="module")
 def solver():
     repo_root = Path(__file__).resolve().parent.parent
-    pdf_path = repo_root / "data" / "report.pdf"
+    pdf_path = repo_root / "data" / "sample_report.pdf"
     if not pdf_path.exists():
         from create_sample_report import generate_sample_pdf
         generate_sample_pdf(pdf_path)

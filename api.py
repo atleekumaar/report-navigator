@@ -840,7 +840,7 @@ def get_indexing_status():
 
 @app.on_event("startup")
 def startup_event():
-    """Ensure active document index is loaded and ready on boot."""
+    """Ensure active document index and solver are pre-warmed and ready on boot."""
     active_pdf = get_active_pdf()
     if not config.CHUNKS_FILE.exists() or config.CHUNKS_FILE.stat().st_size < 100:
         if active_pdf.exists():
@@ -849,6 +849,14 @@ def startup_event():
                 run_indexing_task(active_pdf)
             except Exception as e:
                 print(f"[Startup] Index build error: {e}")
+    try:
+        get_qa_engine()
+        if active_pdf.exists():
+            from qa import get_solver
+            get_solver(str(active_pdf))
+            print(f"[Startup] QA Engine & Solver pre-warmed for {active_pdf.name}")
+    except Exception as e:
+        print(f"[Startup] Pre-warm notice: {e}")
 
 
 if __name__ == "__main__":

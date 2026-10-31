@@ -56,10 +56,10 @@ MIN_COVERAGE_RERANK = float(os.getenv("MIN_COVERAGE_RERANK", "0.3"))
 # Feature Toggles
 USE_DENSE = os.getenv("USE_DENSE", "1").lower() in ("1", "true", "yes")
 USE_RERANK = os.getenv("USE_RERANK", "1").lower() in ("1", "true", "yes")
-USE_REWRITE = os.getenv("USE_REWRITE", "1").lower() in ("1", "true", "yes")
+USE_REWRITE = os.getenv("USE_REWRITE", "0").lower() in ("1", "true", "yes")
 
 # LLM Providers & Keys
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq" if os.getenv("GROQ_API_KEY") else "anthropic").lower()
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
