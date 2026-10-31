@@ -1,15 +1,16 @@
 {
-  "pdf": "report.pdf",
-  "pages": 5,
+  "pdf": "report_A.pdf",
+  "pages": 272,
   "table_pages": {
-    "city_summary": null,
-    "annexure_46": null,
-    "annexure_49": null,
-    "state_killed": null,
-    "state_accidents": null,
-    "collision_type": null,
-    "road_user_national": null,
-    "violation_national": null
+    "city_summary": 101,
+    "annexure_46": 241,
+    "annexure_49": 244,
+    "annexure_3": 143,
+    "state_killed": 94,
+    "state_accidents": 89,
+    "collision_type": 30,
+    "road_user_national": 84,
+    "violation_national": 61
   },
   "status": "READY"
 }
