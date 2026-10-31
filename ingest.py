@@ -338,11 +338,13 @@ def ingest_pdf(pdf_path: Path, output_file: Path = config.CHUNKS_FILE) -> List[D
         table_rects: List[fitz.Rect] = []
 
         try:
-            strategy_kwarg = {}
-            if table_strategy == "text":
-                strategy_kwarg = {"strategy": "text"}
-
-            tabs = page.find_tables(**strategy_kwarg)
+            drawings = page.get_drawings()
+            tabs = None
+            if len(drawings) < 4000:
+                strategy_kwarg = {}
+                if table_strategy == "text":
+                    strategy_kwarg = {"strategy": "text"}
+                tabs = page.find_tables(**strategy_kwarg)
             if tabs and tabs.tables:
                 stats["tables_found"] += len(tabs.tables)
                 for t_idx, tab in enumerate(tabs.tables):

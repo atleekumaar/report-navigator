@@ -2,6 +2,10 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+# Enforce offline HuggingFace behavior for strict offline evaluation and instant loading
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
