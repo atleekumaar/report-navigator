@@ -73,16 +73,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
               Active Report
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse shadow-[0_0_8px_#10B981]" />
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  metadata.page_count > 0
+                    ? "bg-[#10B981] shadow-[0_0_8px_#10B981] animate-pulse"
+                    : "bg-[#F59E0B] shadow-[0_0_8px_#F59E0B]"
+                }`}
+              />
+              <span className="text-[9px] font-mono text-[#D89AB3]">
+                {metadata.page_count > 0 ? "Live" : "Syncing"}
+              </span>
             </span>
           </div>
 
           <div className="space-y-0.5">
             <h4 className="text-xs font-semibold text-white line-clamp-1 leading-snug">
-              {metadata.title || "Report Navigator"}
+              {metadata.title || "Report"}
             </h4>
             <p className="text-[10px] text-[#D89AB3] font-mono truncate">
-              {metadata.filename || "sample_statistical_bulletin_2024.pdf"}
+              {metadata.filename || "report.pdf"}
             </p>
           </div>
 

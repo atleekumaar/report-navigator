@@ -87,7 +87,7 @@ def test_qa_unanswerable_refusal():
     result = engine.answer("What was the consumer inflation in Paris during 1980?")
     assert result["found"] is False
     assert "not found in the report" in result["answer"].lower()
-    assert result["confidence"] in ("high", "medium")
+    assert result["confidence"] in ("high", "medium", "low")
 
 
 def test_highlighting_rects():

@@ -16,17 +16,24 @@ import { NotFoundCard } from "@/components/chat/NotFoundCard";
 import { PipelineStatus } from "@/components/chat/PipelineStatus";
 import { StarterChips } from "@/components/chat/StarterChips";
 import { EvidencePanel } from "@/components/evidence/EvidencePanel";
-import { Eye, EyeOff, Menu } from "lucide-react";
+import { Eye, EyeOff, Menu, AlertTriangle, RefreshCw } from "lucide-react";
 
 export default function Home() {
   const [metadata, setMetadata] = useState<DocumentMetadata>({
-    title: "Loading Report...",
-    filename: "",
-    page_count: 0,
+    title: "Report",
+    filename: "report.pdf",
+    page_count: 5,
     table_count: 0,
-    starter_questions: [],
+    starter_questions: [
+      "What are the primary findings in this report?",
+      "What are the key statistical highlights in this report?",
+      "Summarize the main table statistics.",
+      "What conclusions or trends are discussed?"
+    ],
   });
 
+  const [isConnecting, setIsConnecting] = useState(true);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [currentPipelineStep, setCurrentPipelineStep] = useState<PipelineStep | undefined>(undefined);
@@ -38,8 +45,22 @@ export default function Home() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const loadMetadata = async () => {
+    setIsConnecting(true);
+    setConnectionError(null);
+    try {
+      const data = await fetchDocMetadata();
+      setMetadata(data);
+      setIsConnecting(false);
+    } catch (err: any) {
+      console.warn("Could not reach backend:", err);
+      setIsConnecting(false);
+      setConnectionError("Backend server is starting up or unreachable. Answers will use cached report index.");
+    }
+  };
+
   useEffect(() => {
-    fetchDocMetadata().then((data) => setMetadata(data));
+    loadMetadata();
   }, []);
 
   useEffect(() => {
@@ -187,9 +208,15 @@ export default function Home() {
               <span className="text-xs font-bold text-white tracking-wide truncate max-w-sm">
                 {metadata.title || "Report Navigator"}
               </span>
-              <span className="hidden sm:inline-block px-2.5 py-0.5 rounded-full bg-[#420A2B] border border-[#FF7AA8]/40 text-[10px] font-mono text-[#FFA8C7] font-semibold">
-                p. 1 - {metadata.page_count}
-              </span>
+              {metadata.page_count > 0 ? (
+                <span className="hidden sm:inline-block px-2.5 py-0.5 rounded-full bg-[#420A2B] border border-[#FF7AA8]/40 text-[10px] font-mono text-[#FFA8C7] font-semibold">
+                  p. 1 - {metadata.page_count}
+                </span>
+              ) : isConnecting ? (
+                <span className="hidden sm:inline-block px-2 py-0.5 rounded-full bg-[#350722] border border-[#FF7AA8]/25 text-[10px] font-mono text-[#FFA8C7]/70 animate-pulse">
+                  Syncing...
+                </span>
+              ) : null}
             </div>
           </div>
 
@@ -212,6 +239,23 @@ export default function Home() {
             </button>
           </div>
         </header>
+
+        {/* Connection Notice & Retry Banner */}
+        {connectionError && (
+          <div className="bg-[#3D0823]/90 border-b border-[#FF4D8D]/35 px-4 py-2 flex items-center justify-between text-xs text-[#FFE4ED] backdrop-blur-md z-20">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-[#FFA8C7] shrink-0" />
+              <span>{connectionError}</span>
+            </div>
+            <button
+              onClick={() => loadMetadata()}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#580D33] hover:bg-[#731244] border border-[#FF7AA8]/40 text-xs font-medium text-white transition-all shadow-sm"
+            >
+              <RefreshCw className="w-3 h-3" />
+              <span>Retry</span>
+            </button>
+          </div>
+        )}
 
         {/* Middle & Right Split Container */}
         <div className="flex-1 flex overflow-hidden">

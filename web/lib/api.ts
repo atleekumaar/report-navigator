@@ -1,5 +1,6 @@
 /**
  * API client functions for Report Navigator.
+ * Automatically resolves between production Render backend, Next.js proxy rewrites, and local dev.
  */
 
 import {
@@ -9,34 +10,62 @@ import {
   IndexStatus,
 } from "./types";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000";
+export const PROD_BACKEND_URL = "https://report-navigator-api-4ei5.onrender.com";
+
+export function getApiBase(): string {
+  // 1. Explicit env var if defined
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, "");
+  }
+  // 2. In browser on production (e.g. *.vercel.app or non-localhost)
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host !== "localhost" && host !== "127.0.0.1") {
+      return PROD_BACKEND_URL;
+    }
+  }
+  // 3. Local fallback
+  return "http://127.0.0.1:8000";
+}
 
 /**
  * Fetch document metadata for active report.
  */
 export async function fetchDocMetadata(): Promise<DocumentMetadata> {
+  const base = getApiBase();
+  let lastError: any = null;
+
+  // Primary attempt
   try {
-    const res = await fetch(`${API_BASE}/api/doc`, { cache: "no-store" });
-    if (!res.ok) {
-      throw new Error(`Failed to fetch document metadata: ${res.statusText}`);
+    const res = await fetch(`${base}/api/doc`, { cache: "no-store" });
+    if (res.ok) {
+      return await res.json();
     }
-    return await res.json();
-  } catch (error) {
-    console.error("fetchDocMetadata error:", error);
-    return {
-      title: "Error Connecting to Server",
-      filename: "",
-      page_count: 0,
-      table_count: 0,
-      starter_questions: [
-        "What is the overall unemployment rate in the latest period?",
-        "Which state recorded the highest female labour force participation?",
-        "What are the key findings in Chapter 3?",
-        "Compare the youth unemployment rate between 2023 and 2024.",
-      ],
-    };
+  } catch (err) {
+    lastError = err;
   }
+
+  // Fallback 1: Try relative path rewrite (handles Next.js vercel.json rewrites)
+  if (typeof window !== "undefined" && base !== "") {
+    try {
+      const res = await fetch("/api/doc", { cache: "no-store" });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (_) {}
+  }
+
+  // Fallback 2: Try explicit production Render backend URL directly
+  if (base !== PROD_BACKEND_URL) {
+    try {
+      const res = await fetch(`${PROD_BACKEND_URL}/api/doc`, { cache: "no-store" });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (_) {}
+  }
+
+  throw lastError || new Error("Failed to connect to backend server");
 }
 
 /**
@@ -56,7 +85,8 @@ export function getPageImageUrl(
   if (chunkId) params.set("chunk", chunkId);
 
   const qs = params.toString();
-  return `${API_BASE}/api/page/${page}/image${qs ? `?${qs}` : ""}`;
+  const base = getApiBase();
+  return `${base}/api/page/${page}/image${qs ? `?${qs}` : ""}`;
 }
 
 /**
@@ -70,27 +100,55 @@ export async function streamChat(
   onAnswer: (answer: AnswerResponse) => void,
   onError: (error: Error) => void
 ): Promise<void> {
+  const base = getApiBase();
+  const endpoints = [
+    `${base}/api/chat`,
+    "/api/chat",
+    `${PROD_BACKEND_URL}/api/chat`,
+  ];
+
+  let response: Response | null = null;
+  let connectionError: Error | null = null;
+
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          query,
+          history,
+          use_rerank: useRerank,
+        }),
+      });
+
+      if (res.ok) {
+        response = res;
+        break;
+      }
+    } catch (e: any) {
+      connectionError = e;
+    }
+  }
+
+  if (!response || !response.ok) {
+    onError(
+      connectionError ||
+        new Error(
+          "Failed to reach backend API. Please check your internet connection or backend status."
+        )
+    );
+    return;
+  }
+
+  if (!response.body) {
+    onError(new Error("No response body received from chat stream"));
+    return;
+  }
+
   try {
-    const response = await fetch(`${API_BASE}/api/chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        query,
-        history,
-        use_rerank: useRerank,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Chat API request failed: HTTP ${response.status}`);
-    }
-
-    if (!response.body) {
-      throw new Error("No response body received from chat stream");
-    }
-
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
@@ -146,7 +204,8 @@ export async function uploadPdf(file: File): Promise<{ message: string; status: 
   const formData = new FormData();
   formData.append("file", file);
 
-  const res = await fetch(`${API_BASE}/api/index`, {
+  const base = getApiBase();
+  const res = await fetch(`${base}/api/index`, {
     method: "POST",
     body: formData,
   });
@@ -163,7 +222,8 @@ export async function uploadPdf(file: File): Promise<{ message: string; status: 
  * Poll indexing progress.
  */
 export async function fetchIndexStatus(): Promise<IndexStatus> {
-  const res = await fetch(`${API_BASE}/api/index/status`, { cache: "no-store" });
+  const base = getApiBase();
+  const res = await fetch(`${base}/api/index/status`, { cache: "no-store" });
   if (!res.ok) {
     throw new Error(`Failed to fetch index status: ${res.statusText}`);
   }

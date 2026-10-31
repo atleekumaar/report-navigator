@@ -84,11 +84,15 @@ async def security_headers_middleware(request: Request, call_next):
     return response
 
 # Configure CORS
-allow_all = "*" in config.CORS_ORIGINS
+origins = list(config.CORS_ORIGINS)
+if "https://reposync-ivory.vercel.app" not in origins:
+    origins.append("https://reposync-ivory.vercel.app")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if allow_all else config.CORS_ORIGINS,
-    allow_credentials=False if allow_all else True,
+    allow_origins=origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

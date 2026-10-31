@@ -18,7 +18,16 @@ interface StarterChipsProps {
 
 const DEFAULT_ICONS = [TrendingUp, Users, Key, Calendar];
 
+const FALLBACK_QUESTIONS = [
+  "What are the primary statistical findings and totals in this report?",
+  "Which categories or locations recorded the highest and lowest figures?",
+  "What key trends and percentage changes are highlighted across periods?",
+  "Summarize the main table metrics and conclusions.",
+];
+
 export const StarterChips: React.FC<StarterChipsProps> = ({ questions, onSelect }) => {
+  const activeQuestions =
+    questions && questions.length > 0 ? questions : FALLBACK_QUESTIONS;
   return (
     <div className="space-y-4 max-w-2xl mx-auto py-6 text-center select-none">
       {/* 3D-styled Document & Magnifier Hero Graphic */}
@@ -46,7 +55,7 @@ export const StarterChips: React.FC<StarterChipsProps> = ({ questions, onSelect 
 
       {/* 2x2 Grid of Starter Question Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 text-left">
-        {questions.slice(0, 4).map((q, idx) => {
+        {activeQuestions.slice(0, 4).map((q, idx) => {
           const Icon = DEFAULT_ICONS[idx % DEFAULT_ICONS.length];
           return (
             <button
