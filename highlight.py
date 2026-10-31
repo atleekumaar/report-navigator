@@ -183,3 +183,4 @@ def get_normalized_page_rects(
         "height": page_h,
         "rects": normalized
     }
+

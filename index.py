@@ -19,13 +19,16 @@ def tokenize_for_bm25(text: str) -> List[str]:
     # Find words, numbers with decimals, or numbers with commas
     raw_tokens = re.findall(r'[a-zA-Z0-9_\.%]+(?:,[a-zA-Z0-9_\.%]+)*|\b\w+\b', text.lower())
     for t in raw_tokens:
-        tokens.append(t)
+        clean_t = t.strip('.,?!:;"\'()[]{}')
+        if not clean_t:
+            continue
+        tokens.append(clean_t)
         # If token contains commas in numbers, also add the stripped version
-        if ',' in t and any(ch.isdigit() for ch in t):
-            tokens.append(t.replace(',', ''))
+        if ',' in clean_t and any(ch.isdigit() for ch in clean_t):
+            tokens.append(clean_t.replace(',', ''))
         # If token contains % sign, also add bare number
-        if '%' in t:
-            tokens.append(t.replace('%', ''))
+        if '%' in clean_t:
+            tokens.append(clean_t.replace('%', ''))
     return tokens
 
 def build_contextual_text(chunk: Dict[str, Any]) -> str:
@@ -135,3 +138,4 @@ def build_index():
 
 if __name__ == "__main__":
     build_index()
+

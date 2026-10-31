@@ -50,3 +50,4 @@ export const NotFoundCard: React.FC<NotFoundCardProps> = ({
     </div>
   );
 };
+

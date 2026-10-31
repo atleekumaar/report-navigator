@@ -73,6 +73,16 @@ def verify_citations(
 
     all_source_text = " ".join([s["chunk"]["text"] for s in source_map.values()])
     all_source_numbers = set(extract_numbers(all_source_text))
+    # Also include page indices and labels so page references aren't flagged as hallucinated numbers
+    for s in source_map.values():
+        p = s["chunk"].get("page")
+        lbl = s["chunk"].get("label")
+        if p is not None:
+            all_source_numbers.add(str(p))
+        if lbl is not None:
+            all_source_numbers.add(str(lbl))
+
+    norm_num = lambda n: re.sub(r'[^\d.]', '', n)
 
     for cit in citations:
         sid = cit.get("source_id", "")
@@ -102,9 +112,9 @@ def verify_citations(
                     if prefix in norm_chunk:
                         is_verified = True
 
-            # Number consistency check in quote
-            quote_nums = extract_numbers(quote)
-            chunk_nums = set(extract_numbers(chunk_text))
+            # Number consistency check in quote (normalized for % and decimals)
+            quote_nums = [norm_num(n) for n in extract_numbers(quote) if norm_num(n)]
+            chunk_nums = {norm_num(n) for n in extract_numbers(chunk_text) if norm_num(n)}
             for qn in quote_nums:
                 if qn not in chunk_nums:
                     is_verified = False
@@ -125,13 +135,15 @@ def verify_citations(
             "reason": reason
         })
 
-    # Number hallucination warning check
+    # Number hallucination warning check (exclude citation chip page labels)
     has_number_warning = False
     if not calculation:
-        answer_nums = extract_numbers(answer_text)
+        cleaned_answer_text = re.sub(r'\[p\.\d+\]|\[S\d+\]', '', answer_text)
+        answer_nums = extract_numbers(cleaned_answer_text)
+        all_src_norm = {norm_num(n) for n in all_source_numbers if norm_num(n)}
         for num in answer_nums:
-            # Skip single digit common numbers or year-like 202x if loose
-            if num not in all_source_numbers:
+            n_val = norm_num(num)
+            if n_val and n_val not in all_src_norm:
                 has_number_warning = True
                 break
 

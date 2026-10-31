@@ -153,6 +153,20 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
             </div>
           )}
 
+          <button
+            onClick={() =>
+              window.open(
+                `${process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"}/api/pdf#page=${pageNumber}`,
+                "_blank"
+              )
+            }
+            className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded bg-black/30 hover:bg-black/50 border border-white/5 text-[11px] text-slate-300 hover:text-white transition-colors"
+            title="Open original PDF in browser"
+          >
+            <ExternalLink className="w-3 h-3 text-accent" />
+            <span>Full PDF</span>
+          </button>
+
           {onClose && (
             <button
               onClick={onClose}
@@ -214,6 +228,7 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
                     src={imageUrl}
                     alt={`Page ${pageNumber} Highlight`}
                     onLoad={() => setImageLoading(false)}
+                    onError={() => setImageLoading(false)}
                     className="max-w-full h-auto rounded shadow-lg pulse-evidence"
                   />
                 </div>
@@ -306,3 +321,4 @@ export const EvidencePanel: React.FC<EvidencePanelProps> = ({
     </div>
   );
 };
+

@@ -46,10 +46,13 @@ def detect_page_number_label(page: fitz.Page) -> str:
     return str(page.number + 1)
 
 def is_header_footer(b: tuple, page_rect: fitz.Rect) -> bool:
-    """Check if block falls inside header or footer margin."""
+    """Check if block falls completely inside header or footer margin."""
     y0, y1 = b[1], b[3]
     h = page_rect.height
-    return y0 < (h * config.HEADER_FOOTER_MARGIN_PERCENT) or y1 > (h * (1.0 - config.HEADER_FOOTER_MARGIN_PERCENT))
+    top_margin = h * config.HEADER_FOOTER_MARGIN_PERCENT
+    bottom_margin = h * (1.0 - config.HEADER_FOOTER_MARGIN_PERCENT)
+    # Must be entirely within top margin or entirely within bottom margin
+    return y1 <= top_margin or y0 >= bottom_margin
 
 def detect_heading(text: str) -> Optional[str]:
     """Detect if a block looks like a section or chapter heading."""
@@ -197,6 +200,16 @@ def ingest_pdf(pdf_path: Path, output_file: Path = config.CHUNKS_FILE) -> List[D
         page_label = detect_page_number_label(page)
         page_rect = page.rect
 
+        raw_blocks = page.get_text("blocks", sort=True)
+
+        # Pre-scan blocks for section headings on this page so tables inherit the right section
+        for b in raw_blocks:
+            if b[6] == 0:
+                h_candidate = detect_heading(b[4].strip())
+                if h_candidate:
+                    current_section = h_candidate
+                    break
+
         # 1. Detect tables
         table_chunks: List[Dict[str, Any]] = []
         table_rects: List[fitz.Rect] = []
@@ -204,7 +217,6 @@ def ingest_pdf(pdf_path: Path, output_file: Path = config.CHUNKS_FILE) -> List[D
         try:
             tabs = page.find_tables()
             if tabs and tabs.tables:
-                raw_blocks = page.get_text("blocks", sort=True)
                 for t_idx, tab in enumerate(tabs.tables):
                     t_chunks, t_bbox = process_table(
                         page=page,
@@ -221,7 +233,7 @@ def ingest_pdf(pdf_path: Path, output_file: Path = config.CHUNKS_FILE) -> List[D
             print(f"[Ingest] Table extraction warning on page {page_num}: {e}")
 
         # 2. Extract and chunk text blocks (excluding table areas and headers/footers)
-        blocks = page.get_text("blocks", sort=True)
+        blocks = raw_blocks
         text_accumulator = []
         rect_accumulator = []
         current_char_count = 0
@@ -240,8 +252,11 @@ def ingest_pdf(pdf_path: Path, output_file: Path = config.CHUNKS_FILE) -> List[D
             if is_header_footer(b, page_rect):
                 continue
 
-            # Skip blocks that overlap significantly with tables
-            overlaps_table = any(b_rect.intersects(tr) for tr in table_rects)
+            # Skip blocks that overlap significantly with table interior (> 35% of block area)
+            overlaps_table = any(
+                (b_rect & tr).get_area() > (0.35 * max(1.0, b_rect.get_area()))
+                for tr in table_rects
+            )
             if overlaps_table:
                 continue
 

@@ -126,7 +126,8 @@ def get_page_image(
     page_number: int,
     quote: Optional[str] = Query(None),
     is_table: Optional[bool] = Query(False),
-    zoom: Optional[float] = Query(1.6)
+    zoom: Optional[float] = Query(1.6),
+    chunk_id: Optional[str] = Query(None, alias="chunk")
 ):
     """
     Returns PNG image of the requested page with the cited passage/table row highlighted.
@@ -134,11 +135,20 @@ def get_page_image(
     if not config.PDF_PATH.exists():
         raise HTTPException(status_code=404, detail="PDF not found")
 
+    chunk_rects = None
+    if chunk_id:
+        engine = get_qa_engine()
+        for ch in engine.retriever.indexer.chunks:
+            if ch.get("id") == chunk_id:
+                chunk_rects = ch.get("rects")
+                break
+
     try:
         png_bytes = render_highlighted_page_png(
             pdf_path=config.PDF_PATH,
             page_number=page_number,
             quote=quote,
+            chunk_rects=chunk_rects,
             is_table=is_table,
             zoom=zoom
         )
@@ -150,18 +160,29 @@ def get_page_image(
 def get_page_rects(
     page_number: int,
     quote: Optional[str] = Query(None),
-    is_table: Optional[bool] = Query(False)
+    is_table: Optional[bool] = Query(False),
+    chunk_id: Optional[str] = Query(None, alias="chunk")
 ):
     """
     Returns normalized bounding box coordinates for client-side canvas highlighting.
     """
     if not config.PDF_PATH.exists():
         raise HTTPException(status_code=404, detail="PDF not found")
+
+    chunk_rects = None
+    if chunk_id:
+        engine = get_qa_engine()
+        for ch in engine.retriever.indexer.chunks:
+            if ch.get("id") == chunk_id:
+                chunk_rects = ch.get("rects")
+                break
+
     try:
         data = get_normalized_page_rects(
             pdf_path=config.PDF_PATH,
             page_number=page_number,
             quote=quote,
+            chunk_rects=chunk_rects,
             is_table=is_table
         )
         return data
@@ -181,21 +202,29 @@ async def chat_sse_stream(req: ChatRequest):
         queue.put_nowait({"event": "status", "data": {"step": step, "message": message}})
 
     async def event_generator():
-        # Task runner for QA answer execution
+        # Task runner for QA answer execution with guaranteed completion
         async def run_pipeline():
-            history_dicts = [{"role": m.role, "content": m.content} for m in req.history] if req.history else []
-            loop = asyncio.get_running_loop()
-            answer_payload = await loop.run_in_executor(
-                None,
-                lambda: engine.answer(
-                    query=req.query,
-                    history=history_dicts,
-                    use_rerank=req.use_rerank if req.use_rerank is not None else True,
-                    on_status=sync_status_callback
+            try:
+                history_dicts = [{"role": m.role, "content": m.content} for m in req.history] if req.history else []
+                loop = asyncio.get_running_loop()
+                answer_payload = await loop.run_in_executor(
+                    None,
+                    lambda: engine.answer(
+                        query=req.query,
+                        history=history_dicts,
+                        use_rerank=req.use_rerank if req.use_rerank is not None else True,
+                        on_status=sync_status_callback
+                    )
                 )
-            )
-            await queue.put({"event": "answer", "data": answer_payload})
-            await queue.put(None)  # Sentinel to end stream
+                await queue.put({"event": "answer", "data": answer_payload})
+            except Exception as e:
+                print(f"[API] Error during chat processing: {e}")
+                await queue.put({
+                    "event": "error",
+                    "data": {"detail": str(e) or "An error occurred during query execution."}
+                })
+            finally:
+                await queue.put(None)  # Guaranteed sentinel to close stream
 
         asyncio.create_task(run_pipeline())
 
@@ -246,3 +275,4 @@ def get_indexing_status():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("api:app", host=config.HOST, port=config.PORT, reload=True)
+

@@ -1,0 +1,6 @@
+{
+  "num_chunks": 4,
+  "has_bm25": true,
+  "has_dense": true,
+  "embedding_model": "BAAI/bge-small-en-v1.5"
+}

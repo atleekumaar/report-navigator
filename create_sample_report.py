@@ -92,3 +92,4 @@ def generate_sample_pdf(output_path: Path):
 if __name__ == "__main__":
     out = Path("data/report.pdf")
     generate_sample_pdf(out)
+

@@ -145,3 +145,4 @@ This tests:
     │   └── sidebar/       # Sidebar, Document Card & Upload Trigger
     └── lib/               # Types and SSE API client
 ```
+

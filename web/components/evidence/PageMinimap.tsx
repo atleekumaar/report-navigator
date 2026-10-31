@@ -64,3 +64,4 @@ export const PageMinimap: React.FC<PageMinimapProps> = ({
     </div>
   );
 };
+

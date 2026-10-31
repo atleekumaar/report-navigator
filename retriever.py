@@ -175,7 +175,8 @@ class HybridRetriever:
             final_indices = [idx for idx, _ in scored_candidates[:top_k]]
         else:
             final_indices = expanded_indices[:top_k]
-            scored_candidates = [(idx, 0.0) for idx in final_indices]
+            rrf_dict = dict(top_candidates)
+            scored_candidates = [(idx, rrf_dict.get(idx, 0.0)) for idx in final_indices]
 
         # Build output chunk payloads
         final_chunks = []

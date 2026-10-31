@@ -86,3 +86,4 @@ export const TraceTimeline: React.FC<TraceTimelineProps> = ({ trace }) => {
     </div>
   );
 };
+

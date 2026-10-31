@@ -68,3 +68,4 @@ export const PipelineStatus: React.FC<PipelineStatusProps> = ({ currentStep }) =
     </div>
   );
 };
+
